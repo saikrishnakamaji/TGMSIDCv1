@@ -1,0 +1,36 @@
+DEMS .NET 8 MICROSERVICE TARGET ARCHITECTURE
+
+Browser
+  |
+  | HTTPS / JSON REST
+  v
+ASP.NET Core 8 API Gateway (YARP)
+  |
+  +-- Identity / User Service
+  +-- Master Data Service
+  +-- Indent Service
+  +-- Workflow / Approval Service
+  +-- Tender Service
+  +-- Rate Contract Service
+  +-- Purchase Order Service
+  +-- Vendor Service
+  +-- Delivery Service
+  +-- QA / Acceptance Service
+  +-- Document Service
+  +-- Notification Service
+  +-- Audit Service
+  +-- Reporting / Analytics Service
+
+Infrastructure:
+PostgreSQL (database per service)
+RabbitMQ (events)
+Redis (cache)
+Object Storage (documents/photos)
+Keycloak or Entra ID (identity)
+Serilog + OpenTelemetry (logging/observability)
+Docker/Kubernetes (deployment)
+
+Important:
+Each microservice owns its business data and exposes APIs.
+Cross-service business events can be published through RabbitMQ.
+Reporting should consume approved events/data into a reporting store.

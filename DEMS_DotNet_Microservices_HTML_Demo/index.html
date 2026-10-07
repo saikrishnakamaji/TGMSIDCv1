@@ -1,0 +1,194 @@
+<!doctype html>
+<!-- ============================================================================
+  DEMS · Digital Equipment Management System — Tender Demo Frontend (v2 dynamic)
+  Stack: HTML5 + ES6 + jQuery 3.7 (CDN) + vanilla Canvas charts. No framework.
+  How to run: double-click index.html (file:// OK) or serve via any static host.
+  Future: point window.API_BASE to YARP gateway; replace MockAPI calls in app.js.
+============================================================================= -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DEMS | Digital Equipment Management System</title>
+<link rel="stylesheet" href="css/site.css">
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script>window.jQuery || document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"><\/script>');</script>
+</head>
+<body>
+<div class="shell">
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar" id="sidebar" aria-label="Primary">
+    <div class="brand"><div class="brand-mark">D</div><div><strong>DEMS</strong><small>Digital Equipment Management</small></div></div>
+    <div class="profile"><div class="avatar" id="avatarTx">M</div><div><b id="userName">Madhuri</b><small id="userRole">Administrator · TGMSIDC</small></div></div>
+    <nav id="mainNav">
+      <button class="nav active" data-page="dashboard">▦ <span>Dashboard</span></button>
+      <div class="nav-title">PROCUREMENT</div>
+      <button class="nav" data-page="indents">▤ <span>Indent Receipt</span></button>
+      <button class="nav" data-page="approval">✓ <span>Indent Approval</span><em id="badgeApproval">18</em></button>
+      <button class="nav" data-page="rc">▥ <span>Rate Contracts</span><em id="badgeRC">12</em></button>
+      <button class="nav" data-page="po">▰ <span>Purchase Orders</span></button>
+      <button class="nav" data-page="delivery">⌂ <span>Delivery &amp; Receipt</span></button>
+      <div class="nav-title">QUALITY</div>
+      <button class="nav" data-page="qa">◆ <span>QA &amp; Acceptance</span><em id="badgeQA">42</em></button>
+      <div class="nav-title">MASTER DATA</div>
+      <button class="nav" data-page="masters">⚙ <span>Master Data</span></button>
+      <div class="nav-title">REPORTING</div>
+      <button class="nav" data-page="reports">▥ <span>Reports &amp; Analytics</span></button>
+      <button class="nav" data-page="audit">◷ <span>Audit Trail</span></button>
+    </nav>
+    <div class="side-footer">.NET 8 Microservices<br><span>Demo · <button class="linklike" id="resetDemo">reset data</button></span></div>
+  </aside>
+  <div class="scrim" id="scrim"></div>
+
+  <!-- ============ MAIN ============ -->
+  <main class="main">
+    <header class="topbar">
+      <div class="tb-left"><button id="mobileMenu" class="icon-btn" aria-label="Menu">☰</button>
+        <div class="crumb"><span>DEMS</span><b>/</b><strong id="crumb">Dashboard</strong></div></div>
+      <div class="top-actions">
+        <div class="search">⌕ <input id="globalSearch" placeholder="Search indent / PO / RC / vendor..."></div>
+        <div class="notif-wrap"><button class="icon-btn" id="notifBtn" aria-label="Notifications">◉<i class="dot-n" id="notifDot"></i></button>
+          <div class="notif-pop" id="notifPop"></div></div>
+        <select id="roleSwitch" class="role-switch" title="Switch role (RBAC demo)">
+          <option>Administrator</option><option>TGMSIDC User</option><option>GM Equipment</option>
+          <option>SO Equipment</option><option>Executive Director</option><option>DEO · HoD Facility</option>
+          <option>Consignee</option><option>Vendor</option>
+        </select>
+        <span class="fy">FY <select id="fySel"><option>2026-27</option><option>2025-26</option></select></span>
+        <div class="avatar sm" id="avatarSm">M</div>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="card" id="bootErr" style="display:none;border-color:#e8a0a0;background:#fdf0f0"></div>
+      <!-- DASHBOARD -->
+      <section class="page active" id="page-dashboard">
+        <div class="hero"><div><div class="eyebrow">EXECUTIVE OVERVIEW · <span id="fyEcho">FY 2026-27</span></div>
+          <h1 id="greetTx">Good morning, Madhuri</h1>
+          <p>Monitor the complete equipment procurement lifecycle from indent to acceptance.</p></div>
+          <div class="hero-btns"><button class="secondary" id="btnExportDash">⬇ Export</button><button class="primary" data-goto="newindent">＋ Create New Indent</button></div></div>
+        <div class="kpis" id="dashKpis"><!-- rendered --></div>
+        <div id="roleDash" style="display:none"></div>
+        <div class="grid two">
+          <div class="card"><div class="card-head"><div><h3>Procurement Pipeline</h3><small>Live from mock Indent / PO / Delivery services</small></div><button class="link" data-goto="reports">View details →</button></div>
+            <div class="pipeline" id="pipeline"></div>
+            <div class="chart-row"><canvas id="deptChart" height="120"></canvas>
+              <div class="legend"><b>Procurement by Department</b><span><i class="sw b"></i>Health 42%</span><span><i class="sw t"></i>Medical Edu 31%</span><span><i class="sw g"></i>Family Welfare 18%</span><span><i class="sw a"></i>Others 9%</span></div></div></div>
+          <div class="card"><div class="card-head"><div><h3>RC Expiry Alerts</h3><small>90 / 60 / 30 / 0-day SLA</small></div><button class="link" data-goto="rc">View all →</button></div><div id="rcAlerts"></div></div>
+        </div>
+        <div class="grid three">
+          <div class="card"><div class="card-head"><h3>Recent Activity</h3><button class="link" data-goto="audit">All →</button></div><div id="recentAct"></div></div>
+          <div class="card"><div class="card-head"><h3>Quick Actions</h3></div><div id="quickAct"></div></div>
+          <div class="card status-card"><div class="card-head"><h3>Demo Health</h3><span class="badge green">● LIVE MOCK API</span></div>
+            <small>Latency <b id="latTx">~450ms</b> · localized mock microservices · edits persist via localStorage.</small>
+            <div class="bars"><label>Indent → Verified <b>94%</b></label><div><i style="width:94%"></i></div>
+            <label>Verified → Approved <b>76%</b></label><div><i style="width:76%"></i></div>
+            <label>PO → Accepted <b>53%</b></label><div><i style="width:53%"></i></div></div></div>
+        </div>
+      </section>
+
+      <!-- INDENT RECEIPT -->
+      <section class="page" id="page-indents">
+        <div class="page-head"><div><h1>Indent Receipt</h1><p>Facility-level requirement entry · Equipment master + write-in + scanned copy</p></div>
+          <button class="primary" data-goto="newindent">＋ New Indent</button></div>
+        <div class="card"><div class="filters">
+          <div class="search-field">⌕ <input id="indentQ" placeholder="Search indent number..."></div>
+          <select id="indentStatus"><option>All</option><option>Draft</option><option>Pending TGMSIDC Review</option><option>Returned by TGMSIDC</option><option>Verified</option><option>Pending Approval</option><option>Proposed</option><option>Returned to TGMSIDC</option><option>Approved · RC</option><option>Approved · Tender</option><option>Approved · Local</option><option>Partially Approved</option><option>Rejected</option></select>
+          <select><option>All Facilities</option></select><button class="secondary" id="indentFilterBtn">Filter</button>
+          <span class="spacer"></span><span class="muted" id="indentCount"></span></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Indent No.</th><th>Facility / Institution</th><th>Items</th><th>Est. Value</th><th>Submitted</th><th>Status</th><th></th></tr></thead><tbody id="indentRows"></tbody></table>
+          <div class="state" id="indentState"></div></div></div>
+      </section>
+
+      <!-- CREATE INDENT — SINGLE PAGE FORM -->
+      <section class="page" id="page-newindent">
+        <div class="page-head"><div><h1>Create New Indent</h1><p>Annexure-A §1 · 5-step DEO flow: Details → Institutions → Equipment → Allocation &amp; Funds → Review &amp; Submit</p></div><span class="badge blue" id="draftBadge">Step 1/5</span></div>
+        <div class="card">
+          <div class="wiz" id="wizBody"><!-- single-page form rendered here --></div>
+          <div class="form-actions"><button class="secondary" id="wizSave">Save Draft</button><button class="secondary" id="wizReset">Reset</button><button class="primary" id="wizNext">Submit for Verification →</button></div>
+          <div class="form-err" id="wizErr"></div></div>
+      </section>
+
+      <!-- APPROVAL -->
+      <section class="page" id="page-approval">
+        <div class="page-head"><div><h1>Indent Approval</h1><p>One layer for the active role — TGMSIDC verifies, GM proposes the selected indent, SO approves. Other layers stay hidden.</p></div>
+          <div><select id="approvalSel" class="inline-sel"></select> <button class="secondary" id="btnPdf">Export PDF</button></div></div>
+        <div class="card" id="approvalCard"></div>
+      </section>
+
+      <!-- RC: creation (3) + management (4) -->
+      <section class="page" id="page-rc">
+        <div class="page-head"><div><h1>Rate Contracts</h1><p>Annexure-A §3 · 24-step creation: initiate → specs (doctors) → tender → 9-stage tracker → BFC → header/pricing/CAMC → docs → GM/SO approval · amend / renew / cancel / close</p></div><button class="primary" id="btnNewRC">＋ Create Rate Contract</button></div>
+        <div class="kpis compact" id="rcKpis"></div>
+        <div class="card"><div class="filters"><div class="search-field">⌕ <input id="rcQ" placeholder="Search RC / vendor..."></div>
+          <select id="rcStatus"><option>All</option><option>Draft</option><option>Active</option><option>Expiring</option><option>Expired</option><option>Cancelled</option><option>Closed</option></select><button class="secondary" id="rcFilterBtn">Filter</button>
+          <span class="spacer"></span><span class="muted">Expiry SLA: 90 / 60 / 30 / 0-day alerts · renewal links predecessor</span></div>
+          <div class="tbl-wrap"><table><thead><tr><th>RC No.</th><th>Vendor</th><th>Equipment</th><th>Tender → BFC</th><th>Rate + CAMC</th><th>Valid Till</th><th>Status / Approval</th><th>Action</th></tr></thead><tbody id="rcRows"></tbody></table></div></div>
+        <div class="card" id="rcDetail"><h3>RC Detail</h3><div class="muted">Select View / Renew / Amend on any row — spec confirmation, tender stages, pricing, versions and predecessor link appear here.</div></div>
+      </section>
+
+      <!-- PO: generation (5) + approval (6) + amend/cancel (7) + vendor ack -->
+      <section class="page" id="page-po">
+        <div class="page-head"><div><h1>Purchase Orders</h1><p>Indent + active RC link · L1/L2/L3 split · GST auto-calc · T&amp;C · GM→SO→ED · amend / cancel · Vendor Portal ack</p></div>
+          <div><button class="secondary" id="btnVendorPortal">Vendor Portal view</button> <button class="primary" id="btnNewPO">＋ Generate PO</button></div></div>
+        <div class="card"><div class="filters"><div class="search-field">⌕ <input id="poQ" placeholder="Search PO / indent / vendor..."></div>
+          <select id="poStatus"><option>All</option><option>Draft</option><option>Approved</option><option>Pending Dispatch</option><option>Partially Received</option><option>Amended</option><option>Cancelled</option><option>Closed</option></select><button class="secondary" id="poFilterBtn">Filter</button>
+          <span class="spacer"></span><span class="muted">ED approval above ₹25 L · anomaly check pre-dispatch · PDF auto-gen</span></div>
+          <div class="tbl-wrap"><table><thead><tr><th>PO No. (v)</th><th>Indent / RC / Mode</th><th>Vendors L1/L2/L3</th><th>Value (GST)</th><th>Approval GM→SO→ED</th><th>Status / Ack</th><th></th></tr></thead><tbody id="poRows"></tbody></table></div>
+          <div class="note">Amend = version + re-approval · Cancel frees indent qty + audit trail · Dispatch notified to Vendor Portal.</div></div>
+        <div class="card" id="poDetail"><h3>PO Detail — split, GST, T&amp;C, versions</h3><div class="muted">Select a PO row — vendor split, consignees, GST calc, performance security, versions and ack/dispatch appear here.</div></div>
+        <div class="card" id="vendorCard"><h3>Vendor Portal (cross-cutting)</h3><div id="vendorBody"></div></div>
+      </section>
+
+      <!-- DELIVERY (8) -->
+      <section class="page" id="page-delivery">
+        <div class="page-head"><div><h1>Delivery &amp; Receipt</h1><p>Tracking dashboard · vendor dispatch (Portal) · serial receipt · discrepancy + photo · DCC upload (Portal)</p></div>
+          <div><select id="delSel" class="inline-sel"></select></div></div>
+        <div class="kpis compact" id="delKpis"></div>
+        <div class="card"><div class="tbl-wrap"><table><thead><tr><th>PO</th><th>Vendor</th><th>Equipment</th><th>Expected</th><th>Received</th><th>Dispatch (Portal)</th><th>Receipt Status</th></tr></thead><tbody id="delRows"></tbody></table></div></div>
+        <div class="card" id="delDetail"></div>
+      </section>
+
+      <!-- QA (9) -->
+      <section class="page" id="page-qa">
+        <div class="page-head"><div><h1>Quality Assurance &amp; Acceptance</h1><p>Committee · auto checklist from PO specs · install / training · warranty · Paid/Not-Paid</p></div>
+          <div><select id="qaSel" class="inline-sel"></select></div></div>
+        <div class="card" id="qaCard"></div>
+      </section>
+
+      <!-- MASTERS (10) -->
+      <section class="page" id="page-masters">
+        <div class="page-head"><div><h1>Master Data Management</h1><p>12 RFP masters · key fields · ownership &amp; frequency · approval workflow · Excel bulk upload</p></div>
+          <div><button class="secondary" id="btnBulk">⬆ Bulk Upload</button> <button class="primary" id="btnMasterAdd">＋ Add Record</button></div></div>
+        <div class="master-grid" id="masterGrid"></div>
+        <div class="card" id="masterDetail"><h3>Master records</h3><div class="muted">Select Manage on any tile — records with Active / Pending Approval + approve action appear here.</div></div>
+      </section>
+
+      <!-- REPORTS (11) -->
+      <section class="page" id="page-reports">
+        <div class="page-head"><div><h1>Reports &amp; Analytics</h1><p>15 configurable reports + 12 KPI dashboards · drill-down · filters · Excel/PDF</p></div>
+          <div><button class="secondary" id="btnPrint">Export PDF</button> <button class="primary" id="btnCsv">Export Excel</button></div></div>
+        <div class="card"><div class="filters"><select id="repFY"><option>FY 2026-27</option><option>FY 2025-26</option></select><select><option>All Districts</option></select><select><option>All Departments</option></select><select id="repVendor"><option>All Vendors</option><option>ABC Medical Systems</option><option>XYZ Healthcare</option><option>MedEquip India</option></select><select><option>All Equipment</option></select><select id="repStatus"><option>All Status</option><option>Submitted</option><option>Verified</option><option>Approved</option><option>Delivered</option><option>Accepted</option></select><button class="primary" id="reportApply">Apply Filters</button></div></div>
+        <h3 class="subhead">KPI dashboards (12)</h3><div class="kpis" id="kpiGrid" style="grid-template-columns:repeat(4,1fr)"></div>
+        <h3 class="subhead">MIS reports (15)</h3><div class="report-grid" id="reportGrid"></div>
+      </section>
+
+      <!-- AUDIT -->
+      <section class="page" id="page-audit">
+        <div class="page-head"><div><h1>Audit Trail</h1><p>Immutable · user + timestamp + before/after · Admin/GM view</p></div><span class="badge gray">🔒 append-only</span></div>
+        <div class="card"><div class="filters"><div class="search-field">⌕ <input id="auditQ" placeholder="Search transaction..."></div><button class="secondary" id="auditBtn">Filter</button></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Date &amp; Time</th><th>User</th><th>Module</th><th>Action</th><th>Reference</th><th>Source</th></tr></thead><tbody id="auditRows"></tbody></table></div></div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<!-- Modal + Toast -->
+<div class="modal-back" id="modalBack"><div class="modal" role="dialog"><div class="modal-head"><h3 id="modalTitle">Details</h3><button class="icon-btn" id="modalX">✕</button></div><div class="modal-body" id="modalBody"></div></div></div>
+<div class="toast" id="toast"></div>
+<input type="file" id="hiddenFile" hidden>
+
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
