@@ -30,12 +30,18 @@
   /* ================= 0. Utils ================= */
   const $toast = $('#toast');
   let toastTimer = null;
+  const hideToast = () => { clearTimeout(toastTimer); $toast.removeClass('show'); };
+  const armToast = () => { clearTimeout(toastTimer); toastTimer = setTimeout(hideToast, 5000); };
   const toast = (msg, type = 'ok') => {
-    $toast.text(msg).removeClass('ok err').addClass(`show ${type}`);
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => $toast.removeClass('show'), 2600);
+    const title = type === 'err' ? 'Needs attention' : 'Done';
+    const icon = type === 'err' ? '!' : '✓';
+    $toast.html(`<span class="toast-ic" aria-hidden="true">${icon}</span><span class="toast-body"><b>${title}</b><span>${esc(msg)}</span></span><button type="button" class="toast-x" aria-label="Close">✕</button>`)
+      .removeClass('ok err').addClass(`show ${type}`);
+    armToast();
   };
-  $(document).on('click', '#toast.show', () => { clearTimeout(toastTimer); $toast.removeClass('show'); }); // click-to-dismiss
+  $(document).on('click', '.toast-x', (e) => { e.stopPropagation(); hideToast(); });
+  $(document).on('mouseenter', '#toast.show', () => clearTimeout(toastTimer));
+  $(document).on('mouseleave', '#toast.show', () => { if ($toast.hasClass('show')) armToast(); });
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const deepClone = (v) => (typeof structuredClone === 'function' ? structuredClone(v) : JSON.parse(JSON.stringify(v)));
   const badgeFor = (s) => {
@@ -809,22 +815,31 @@
     const dis = (r.locked || !canDo('rc.edit')) ? 'disabled' : '';
     const gmOk = canDo('rc.gm'), soOk = canDo('rc.so');
     const L1 = (r.pricing || [])[0] || {};
-    $('#rcDetail').html(`<h3>${esc(r.no)} · ${esc(r.equipment)} ${alert}</h3>
-      <div class="bars" style="margin:10px 0"><label>RC Creation progress (24 steps) <b>${prog}%</b> · ${badge(r.status)} · ${badge(r.submitStatus || r.approval || 'Draft')}</label><div><i style="width:${prog}%"></i></div></div>
+    const dupHit = rcActiveDup(r.equipment, r.no);
+    const s1Done = !!(r.tender && r.tender.ref && (r.stages.opened || {}).done);
+    const s2Done = s1Done && r.stages.bfcdec.yes === 'Yes' && !!(r.header.start && r.header.end && r.header.end > r.header.start) && (r.pricing || []).some((p) => +p.rateEx > 0);
+    const s3Done = r.soDecision === 'Approved' || r.status === 'Active';
+    const activeN = s3Done ? 4 : s2Done ? 3 : s1Done ? 2 : 1;
+    const stg = (n, title, sub) => { const cls = n < activeN ? 'done' : n === activeN ? 'active' : ''; return `<div class="stg ${cls}"><i>${cls === 'done' ? '✓' : n}</i><b>${title}<small>${sub}</small></b></div>`; };
+    const phase1Dis = (r.locked || (!canDo('rc.edit') && !canDo('rc.create'))) ? 'disabled title="Requires TGMSIDC User role"' : '';
+    $('#rcDetail').html(`<div class="phase-head"><h3>${esc(r.no)} · ${esc(r.equipment)}</h3><div class="rc-tools">${alert}<button class="danger" data-rc-cancel ${canDo('rc.edit') ? '' : 'disabled title="Requires TGMSIDC User role"'}>Cancel Tender</button>${r.status === 'Cancelled' ? `<button class="primary" data-rc-retender ${canDo('rc.edit') ? '' : 'disabled title="Requires TGMSIDC User role"'}>↻ Re-tender</button>` : ''}</div></div>
+      <div class="bars" style="margin:6px 0 10px"><label>Creation progress <b>${prog}%</b> · ${badge(r.status)} · ${badge(r.submitStatus || r.approval || 'Draft')}</label><div><i style="width:${prog}%"></i></div></div>
+      <div class="rc-stepper">${stg(1, 'Stage 1', 'Initiation & Tender Setup')}${stg(2, 'Stage 2', 'Evaluation & Award Terms')}${stg(3, 'Stage 3', 'Executive Approval & Lifecycle')}</div>
       ${r.retenderOf ? `<div class="review-box">Re-tender of <b>${esc(r.retenderOf)}</b> (cancelled tender linked, audit preserved).</div>` : ''}
-      <div class="wsteps">${['1 Initiate', '2–5 Specs', '6 Tender', '7–15 Stages', '16 Cancel', '17–18 Header', '19–20 Price', '21 Docs', '22–24 Approval'].map((t) => `<span class="wstep${/Approval/.test(t) && r.soDecision ? ' done' : ''}"><i>•</i><b><small>${t}</small></b></span>`).join('')}</div>
+      ${r.status === 'Cancelled' ? `<div class="review-box">Cancelled at <b>${esc(r.cancel.stage)}</b> · reason: ${esc(r.cancel.reason)} ${r.cancel.doc ? '· 📄 ' + esc(r.cancel.doc) : ''} · preserved for audit.</div>` : ''}
 
-      <h3 class="subhead">Step 1 · Initiate RC <small style="color:#6f7f93">auto draft ID · duplicate block · Existing/New flag</small></h3>
-      <div class="review-box">RC ID (auto): <b>${esc(r.no)}</b> · Flag: <b>${esc(r.equipFlag)}</b> · ${r.status === 'Draft' ? 'Draft — complete initiation below.' : 'Linked indent: <b>' + esc(r.indentRef || 'direct') + '</b>'}${r.predecessor ? ' · Renewal of <b>' + esc(r.predecessor) + '</b>' : ''}</div>
+      <div class="phase-card"><div class="phase-head"><h3>Phase 1: RC Initiation &amp; Tender Notice</h3><span class="badge blue">Steps 1–7</span></div>
+      <div class="phase-sec">Initiation · duplicate check</div>
+      <div class="review-box">RC ID (auto): <b>${esc(r.no)}</b> · Flag: <b>${esc(r.equipFlag)}</b> · ${dupHit ? `<span class="badge red">Duplicate: active ${esc(dupHit.no)}</span>` : '<span class="badge green">No active duplicate</span>'} · ${r.status === 'Draft' ? 'Draft' : 'Linked indent: <b>' + esc(r.indentRef || 'direct') + '</b>'}${r.predecessor ? ' · Renewal of <b>' + esc(r.predecessor) + '</b>' : ''}</div>
       ${r.status === 'Draft' ? `<div class="form-grid" style="margin-top:8px">
-        <label>Equipment (master)<select id="rcEq">${window.DEMS_MASTERS.EQUIPMENT_MASTER.map((m) => `<option value="${m.name}" ${r.equipment === m.name ? 'selected' : ''}>${esc(m.name)} (${esc(m.category || '')})</option>`).join('')}<option value="__WRITEIN__">✎ Write-in (from indent)</option></select></label>
-        <label>Write-in name (if not in master)<input id="rcEqW" placeholder="e.g. Portable Dialysis Unit"></label>
-        <label>Category<input id="rcCat" value="${esc(r.category)}"></label><label>Department<input id="rcDept" value="${esc(r.department)}"></label>
-        <label>Linked indent ref<select id="rcInd"><option value="">— direct —</option>${DB.data.indents.filter((x) => /Approved|Partially/i.test(x.status)).map((x) => `<option ${r.indentRef === x.id ? 'selected' : ''}>${esc(x.id)}</option>`).join('')}</select></label>
-      </div><div class="form-actions" style="justify-content:flex-start;margin-top:8px"><button class="primary" data-rc-s1 ${canDo('rc.create') ? '' : 'disabled title="Requires TGMSIDC User role"'}>Save initiation → Step 2</button></div>` : ''}
+        <label>Equipment (master)<select id="rcEq" ${dis}>${window.DEMS_MASTERS.EQUIPMENT_MASTER.map((m) => `<option value="${m.name}" ${r.equipment === m.name ? 'selected' : ''}>${esc(m.name)} (${esc(m.category || '')})</option>`).join('')}<option value="__WRITEIN__">✎ Write-in (from indent)</option></select></label>
+        <label>Write-in name (if not in master)<input id="rcEqW" placeholder="e.g. Portable Dialysis Unit" ${dis}></label>
+        <label>Category<input id="rcCat" value="${esc(r.category)}" ${dis}></label><label>Department<input id="rcDept" value="${esc(r.department)}" ${dis}></label>
+        <label>Linked indent ref<select id="rcInd" ${dis}><option value="">— direct —</option>${DB.data.indents.filter((x) => /Approved|Partially/i.test(x.status)).map((x) => `<option ${r.indentRef === x.id ? 'selected' : ''}>${esc(x.id)}</option>`).join('')}</select></label>
+      </div>` : ''}
 
-      <h3 class="subhead">Steps 2–5 · Specifications <small style="color:#6f7f93">doctors committee (HoD-assigned) · signed doc mandatory · datetime auto</small></h3>
-      <div class="review-box">Status: <b>${esc(r.spec.status)}</b> ${r.specsFinal ? '· <b>Specs Finalized — locked unless new tender cycle</b>' : ''} · Doctors: ${esc(r.spec.doctors || '—')} ${r.spec.ts ? '· ' + esc(r.spec.ts) : ''}${r.spec.doc ? ' · 📄 ' + esc(r.spec.doc) : ''}</div>
+      <div class="phase-sec">Specifications · doctors committee</div>
+      <div class="review-box">${r.specsFinal ? '<span class="badge green">Accepted · Locked</span>' : `<span class="badge yellow">${esc(r.spec.status || 'Pending')}</span>`} · Doctors: ${esc(r.spec.doctors || '—')} ${r.spec.ts ? '· ' + esc(r.spec.ts) : ''}${r.spec.doc ? ' · 📄 ' + esc(r.spec.doc) : ''}</div>
       ${!r.specsFinal ? (/New/.test(r.equipFlag) ? `
         <div class="form-grid" style="margin-top:8px"><label style="grid-column:1/-1">New specs (HoD recommendation, free-text) *<textarea id="rcNewSpec" rows="3" style="width:100%;border:1px solid #d8e0ea;border-radius:7px;padding:6px 8px">${esc(r.spec.revised)}</textarea></label>
         <label>Doctor / approver names *<input id="rcNewDocs" value="${esc(r.spec.doctors)}" placeholder="comma-separated"></label></div>
@@ -839,15 +854,20 @@
         <div class="form-actions" style="justify-content:flex-start;margin-top:8px"><button class="primary" data-rc-spec ${dis}>Confirm specs → Finalized</button></div>`) : ''}
       ${(r.spec.versions || []).map((x) => `<div class="activity"><span class="check">v${x.v}</span><div><b>${esc(x.type)}</b><small>${esc(x.by)} · ${esc(x.ts)}</small></div></div>`).join('')}
 
-      <h3 class="subhead">Step 6 · Tender on e-Procurement / GeM <small style="color:#6f7f93">tool tracks reference + stages; tendering happens externally</small></h3>
+      <div class="phase-sec">Tender notice · e-Procurement / GeM</div>
       <div class="form-grid"><label>Tender ref no. (unique) *<input id="rcTRef" value="${esc(r.tender.ref)}" ${dis}></label>
       <label>Tender date<input id="rcTDate" type="date" value="${esc(r.tender.date)}" ${dis}></label>
-      <label>Type<select id="rcTType"><option ${r.tender.type === 'Open' ? 'selected' : ''}>Open</option><option ${r.tender.type === 'Limited' ? 'selected' : ''}>Limited</option></select></label>
-      <label>Portal<select id="rcTPortal"><option ${/e-Proc/i.test(r.tender.portal) ? 'selected' : ''}>e-Procurement</option><option ${/GeM/.test(r.tender.portal) ? 'selected' : ''}>GeM</option></select></label></div>
-      <div class="form-actions" style="justify-content:flex-start;margin-top:8px"><button class="secondary" data-rc-t6 ${dis}>Save tender entry (audit)</button></div>
+      <label>Type<select id="rcTType" ${dis}><option ${r.tender.type === 'Open' ? 'selected' : ''}>Open</option><option ${r.tender.type === 'Limited' ? 'selected' : ''}>Limited</option></select></label>
+      <label>Portal<select id="rcTPortal" ${dis}><option ${/e-Proc/i.test(r.tender.portal) ? 'selected' : ''}>e-Procurement</option><option ${/GeM/.test(r.tender.portal) ? 'selected' : ''}>GeM</option></select></label>
+      <label>Opening date<input id="rs_opened_openingDate" type="date" value="${esc(r.stages.opened.openingDate || r.tender.openingDate || '')}" ${dis}></label>
+      <label>Bid start<input id="rs_opened_bidStart" type="date" value="${esc(r.stages.opened.bidStart || r.tender.bidStart || '')}" ${dis}></label>
+      <label>Bid end<input id="rs_opened_bidEnd" type="date" value="${esc(r.stages.opened.bidEnd || r.tender.bidEnd || '')}" ${dis}></label>
+      <label style="grid-column:1/-1">Remarks<input id="rs_opened_remarks" value="${esc(r.stages.opened.remarks || r.tender.remarks || '')}" ${dis}></label></div>
+      <div class="form-actions" style="justify-content:flex-start"><button class="primary" data-rc-phase1 ${phase1Dis}>Save Initiation &amp; Tender Details</button></div>
+      </div>
 
-      <h3 class="subhead">Steps 7–15 · Tender stage tracker <small style="color:#6f7f93">cancel possible at any stage → Step 16</small></h3>
-      ${rcStageCard(r, 'opened', '7 · Tender Opened', `<label>Opening date<input id="rs_opened_openingDate" type="date" value="${esc(r.stages.opened.openingDate || '')}" ${dis}></label><label>Bid start<input id="rs_opened_bidStart" type="date" value="${esc(r.stages.opened.bidStart || '')}" ${dis}></label><label>Bid end<input id="rs_opened_bidEnd" type="date" value="${esc(r.stages.opened.bidEnd || '')}" ${dis}></label><label>Remarks<input id="rs_opened_remarks" value="${esc(r.stages.opened.remarks || '')}" ${dis}></label>`)}
+      <div class="phase-card"><div class="phase-head"><h3>Phase 2: Tender Evaluation, BFC, Commercials &amp; Final Submission</h3><span class="badge blue">Steps 8–22</span></div>
+      <div class="phase-sec">Pre-bid, amendments, evaluation</div>
       ${rcStageCard(r, 'prebid', '8 · Pre-bid Queries', `<label>Queries received<select id="rs_prebid_got"><option ${r.stages.prebid.got === 'No' ? 'selected' : ''}>No</option><option ${r.stages.prebid.got === 'Yes' ? 'selected' : ''}>Yes</option></select></label><label>Meeting date<input id="rs_prebid_meet" type="date" value="${esc(r.stages.prebid.meet || '')}" ${dis}></label>${rcFileDrop('Pre-bid queries')}${rcFileDrop('Pre-bid responses')}`)}
       ${rcStageCard(r, 'amend', '9 · Amendments', `<label>Amendments made<select id="rs_amend_got"><option ${r.stages.amend.got === 'No' ? 'selected' : ''}>No</option><option ${r.stages.amend.got === 'Yes' ? 'selected' : ''}>Yes</option></select></label><label>Amend date<input id="rs_amend_date" type="date" value="${esc(r.stages.amend.date || '')}" ${dis}></label><label style="grid-column:1/-1">Summary<input id="rs_amend_summary" value="${esc(r.stages.amend.summary || '')}" ${dis}></label>${rcFileDrop('Amended tender')}`)}
       ${rcStageCard(r, 'bideval', '10 · Bid Evaluation', `<label>Bids evaluated<input id="rs_bideval_count" type="number" min="0" value="${r.stages.bideval.count || 0}" ${dis}></label><label>Eval start<input id="rs_bideval_start" type="date" value="${esc(r.stages.bideval.start || '')}" ${dis}></label><label>Eval end<input id="rs_bideval_end" type="date" value="${esc(r.stages.bideval.end || '')}" ${dis}></label>${rcFileDrop('Bid evaluation report')}`)}
@@ -855,11 +875,9 @@
       ${rcStageCard(r, 'techdec', '12 · Tech Committee decision *', `<label>Recommended?<select id="rs_techdec_yes"><option value="">— Decide —</option><option ${r.stages.techdec.yes === 'Yes' ? 'selected' : ''}>Yes</option><option ${r.stages.techdec.yes === 'No' ? 'selected' : ''}>No</option></select></label><label>Approved vendors (if Yes)<input id="rs_techdec_vendors" value="${esc(r.stages.techdec.vendors || '')}" ${dis}></label>${rcFileDrop('Technical committee recommendation')}${r.stages.techdec.yes === 'No' ? '<div class="form-err">No vendor qualified → cancel tender (Step 16) and start fresh from Step 6.</div>' : ''}`)}
       ${rcStageCard(r, 'finbid', '13 · Financial Bid + BFC Agenda', `<label>Fin bid open date<input id="rs_finbid_open" type="date" value="${esc(r.stages.finbid.open || '')}" ${dis}></label><label>L1 vendor<input id="rs_finbid_l1v" value="${esc(r.stages.finbid.l1v || '')}" ${dis}></label><label>L1 rate ₹<input id="rs_finbid_l1r" type="number" value="${r.stages.finbid.l1r || 0}" ${dis}></label><label>L2 vendor<input id="rs_finbid_l2v" value="${esc(r.stages.finbid.l2v || '')}" ${dis}></label><label>L2 rate ₹<input id="rs_finbid_l2r" type="number" value="${r.stages.finbid.l2r || 0}" ${dis}></label><label>L3 vendor<input id="rs_finbid_l3v" value="${esc(r.stages.finbid.l3v || '')}" ${dis}></label><label>L3 rate ₹<input id="rs_finbid_l3r" type="number" value="${r.stages.finbid.l3r || 0}" ${dis}></label><label>BFC agenda date<input id="rs_finbid_agenda" type="date" value="${esc(r.stages.finbid.agenda || '')}" ${dis}></label>${rcFileDrop('Financial bid comparison')}`)}
       ${rcStageCard(r, 'bfcmeet', '14 · BFC Meeting', `<label>Tentative date<input id="rs_bfcmeet_tent" type="date" value="${esc(r.stages.bfcmeet.tent || '')}" ${dis}></label><label>Actual date<input id="rs_bfcmeet_actual" type="date" value="${esc(r.stages.bfcmeet.actual || '')}" ${dis}></label><label>Members present<input id="rs_bfcmeet_members" value="${esc(r.stages.bfcmeet.members || '')}" ${dis}></label>${rcFileDrop('BFC minutes')}`)}
-      ${rcStageCard(r, 'bfcdec', '15 · BFC Approved? *', `<label>Decision<select id="rs_bfcdec_yes"><option value="">— Decide —</option><option ${r.stages.bfcdec.yes === 'Yes' ? 'selected' : ''}>Yes</option><option ${r.stages.bfcdec.yes === 'No' ? 'selected' : ''}>No</option></select></label><label>Approval ref no.<input id="rs_bfcdec_refNo" value="${esc(r.stages.bfcdec.refNo || '')}" ${dis}></label><label>Approval date<input id="rs_bfcdec_refDate" type="date" value="${esc(r.stages.bfcdec.refDate || '')}" ${dis}></label>${rcFileDrop('BFC approval')}${r.stages.bfcdec.yes === 'No' ? '<div class="form-err">BFC rejected → cancel tender (Step 16); fresh tender from Step 6.</div>' : ''}`)}
-      <div class="form-actions" style="justify-content:flex-start;flex-wrap:wrap"><button class="secondary" data-rc-cancel ${canDo('rc.edit') ? '' : 'disabled title="Requires TGMSIDC User role"'}>Step 16 · Cancel tender (any stage)</button>${r.status === 'Cancelled' ? `<button class="primary" data-rc-retender ${canDo('rc.edit') ? '' : 'disabled title="Requires TGMSIDC User role"'}>↻ Start re-tender from Step 6 (linked)</button>` : ''}</div>
-      ${r.status === 'Cancelled' ? `<div class="review-box">Cancelled at <b>${esc(r.cancel.stage)}</b> · reason: ${esc(r.cancel.reason)} ${r.cancel.doc ? '· 📄 ' + esc(r.cancel.doc) : ''} · preserved for audit.</div>` : ''}
+      ${rcStageCard(r, 'bfcdec', '15 · BFC Approved? *', `<label>Decision<select id="rs_bfcdec_yes"><option value="">— Decide —</option><option ${r.stages.bfcdec.yes === 'Yes' ? 'selected' : ''}>Yes</option><option ${r.stages.bfcdec.yes === 'No' ? 'selected' : ''}>No</option></select></label><label>Approval ref no.<input id="rs_bfcdec_refNo" value="${esc(r.stages.bfcdec.refNo || '')}" ${dis}></label><label>Approval date<input id="rs_bfcdec_refDate" type="date" value="${esc(r.stages.bfcdec.refDate || '')}" ${dis}></label>${rcFileDrop('BFC approval')}${r.stages.bfcdec.yes === 'No' ? '<div class="form-err">BFC rejected — use Cancel Tender. A fresh tender starts from Phase 1.</div>' : ''}`)}
 
-      <h3 class="subhead">Steps 17–18 · RC header + tender/bank <small style="color:#6f7f93">end &gt; start · validity auto · &gt;24mo alert · IFSC check</small></h3>
+      <div class="phase-sec">RC header, bank, pricing &amp; CAMC</div>
       <div class="form-grid two-col"><label>Award date<input id="rh_award" type="date" value="${esc(r.header.award)}" ${dis}></label>
       <label>Contract start (From)<input id="rh_start" type="date" value="${esc(r.header.start)}" ${dis}></label>
       <label>Contract end (To)<input id="rh_end" type="date" value="${esc(r.header.end)}" ${dis}></label>
@@ -870,7 +888,7 @@
       ${(r.pricing || []).map((p, i) => `<div class="form-grid" style="margin-top:8px"><label>${esc(p.rank)} bank<input data-bank="${i}:bank" value="${esc((r.bank[i] || {}).bank || '')}" placeholder="Bank name" ${dis}></label><label>Branch<input data-bank="${i}:branch" value="${esc((r.bank[i] || {}).branch || '')}" ${dis}></label><label>IFSC (11-char)<input data-bank="${i}:ifsc" value="${esc((r.bank[i] || {}).ifsc || '')}" placeholder="HDFC0001234" ${dis}></label><label>Account no.<input data-bank="${i}:acct" value="${esc((r.bank[i] || {}).acct || '')}" ${dis}></label></div>`).join('')}
       <div class="form-actions" style="justify-content:flex-start;margin-top:8px"><button class="secondary" data-rc-header ${dis}>Save header + bank</button></div>
 
-      <h3 class="subhead">Steps 19–20 · Pricing + CAMC <small style="color:#6f7f93">incl-tax auto · GST slab check · CAMC start = warranty end +1</small></h3>
+      <div class="phase-sec">Pricing &amp; CAMC · incl-tax auto · GST slab</div>
       ${(r.pricing || []).map((p, i) => `<div class="fund-card"><b>${esc(p.rank)}</b> · ${esc(p.vendor || '—')}
         <div class="form-grid" style="margin-top:8px"><label>Vendor<select data-px="${i}:vendor">${window.DEMS_MASTERS.VENDOR_MASTER.map((v) => `<option ${p.vendor === v.name ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></label>
         <label>Rate/unit excl tax ₹<input type="number" data-px="${i}:rateEx" value="${p.rateEx}" ${dis}></label>
@@ -885,25 +903,30 @@
       <label style="grid-column:1/-1">CAMC terms<input id="rcCamcT" value="${esc(r.camc.terms)}" ${dis}></label></div>
       <div class="form-actions" style="justify-content:flex-start;margin-top:8px"><button class="secondary" data-rc-price ${dis}>Save pricing + CAMC</button></div>
 
-      <h3 class="subhead">Step 21 · Documents <small style="color:#6f7f93">contract copy + BFC approval mandatory · PDF/JPG/PNG ≤30MB</small></h3>
+      <div class="phase-sec">Document checklist · contract + BFC approval required</div>
       <div class="upload">${r.docs.map((d, di) => `<div>📄 <b>${esc(d.name)}</b><small>${esc(d.kind)}${d.sizeMB ? ' · ' + d.sizeMB + ' MB' : ''}</small><button class="rowbtn" data-rc-docdel="${di}" ${canDo('rc.edit') ? '' : 'disabled'} style="position:absolute;right:8px;top:8px">✕</button></div>`).join('')}<label class="drop">＋ Upload<select id="rcDocKind" style="min-height:28px;margin:4px 0">${RC_DOC_KINDS.map((k) => `<option>${k}</option>`).join('')}</select><input type="file" id="rcDocFile" hidden accept=".pdf,.jpg,.jpeg,.png"></label></div>
 
-      <h3 class="subhead">Steps 22–24 · Submit + GM + SO <small style="color:#6f7f93">lock on submit · new-equipment master trigger on approve</small></h3>
-      <div class="review-box"><b>Submit checklist:</b> ${[['Specs finalized', r.specsFinal], ['Tender ref entered', !!(r.tender && r.tender.ref)], ['BFC approved Yes', r.stages.bfcdec.yes === 'Yes'], ['Header valid (end>start)', !!(r.header.start && r.header.end && r.header.end > r.header.start)], ['L1 pricing entered', (r.pricing || []).some((p) => +p.rateEx > 0)], ['Contract copy attached', (r.docs || []).some((d) => d.kind === 'Signed contract copy')], ['BFC approval attached', (r.docs || []).some((d) => /BFC approval/.test(d.kind))]].map(([l, ok]) => `<div class="${ok ? 'ok-tx' : 'bad-tx'}">${ok ? '✓' : '○'} ${l}</div>`).join('')}
+      <div class="phase-sec">Submission readiness</div>
+      <div class="review-box"><b>Checklist</b> ${[['Specs finalized', r.specsFinal], ['Tender ref entered', !!(r.tender && r.tender.ref)], ['BFC approved Yes', r.stages.bfcdec.yes === 'Yes'], ['Header valid (end>start)', !!(r.header.start && r.header.end && r.header.end > r.header.start)], ['L1 pricing entered', (r.pricing || []).some((p) => +p.rateEx > 0)], ['Contract copy attached', (r.docs || []).some((d) => d.kind === 'Signed contract copy')], ['BFC approval attached', (r.docs || []).some((d) => /BFC approval/.test(d.kind))]].map(([l, ok]) => `<div class="${ok ? 'ok-tx' : 'bad-tx'}">${ok ? '✓' : '○'} ${l}</div>`).join('')}
       ${r.submitStatus ? `Submitted → <b>${esc(r.submitStatus)}</b> · locked · GM: <b>${esc(r.gmDecision || '—')}</b> · SO: <b>${esc(r.soDecision || '—')}</b>` : ''}</div>
       <div class="form-actions" style="justify-content:flex-start;flex-wrap:wrap">
-        ${!r.submitStatus ? `<button class="primary" data-rc-submit ${canDo('rc.edit') ? '' : 'disabled title="Requires TGMSIDC User role"'}>Submit for RC approval (lock) →</button>` : ''}
-        ${r.submitStatus && !r.gmDecision ? `<label class="muted">GM note<input id="rcGmNote" value="${esc(r.gmNote)}" style="width:220px;min-height:36px;border:1px solid #d8e0ea;border-radius:7px;padding:0 8px" ${gmOk ? '' : 'disabled'}></label><button class="primary" data-rc-gm="approve" ${gmOk ? '' : 'disabled title="Requires GM Equipment role"'}>GM: Propose Approve</button><button class="secondary" data-rc-gm="return" ${gmOk ? '' : 'disabled title="Requires GM Equipment role"'}>GM: Return</button><button class="danger" data-rc-gm="reject" ${gmOk ? '' : 'disabled title="Requires GM Equipment role"'}>GM: Reject</button>${gmOk ? '' : '<div class="muted">🔒 GM decision needs GM Equipment role.</div>'}` : ''}
-        ${r.gmDecision === 'Proposed to Approve' && !r.soDecision ? `<label class="muted">SO note<input id="rcSoNote" value="${esc(r.soNote)}" style="width:220px;min-height:36px;border:1px solid #d8e0ea;border-radius:7px;padding:0 8px" ${soOk ? '' : 'disabled'}></label><button class="primary" data-rc-so="approve" ${soOk ? '' : 'disabled title="Requires SO Equipment role"'}>SO: Approve → Active</button><button class="secondary" data-rc-so="return" ${soOk ? '' : 'disabled title="Requires SO Equipment role"'}>SO: Return → Step 18</button><button class="danger" data-rc-so="reject" ${soOk ? '' : 'disabled title="Requires SO Equipment role"'}>SO: Reject</button>${soOk ? '' : '<div class="muted">🔒 SO decision needs SO Equipment role.</div>'}` : ''}
+        ${!r.submitStatus ? `<button class="primary" data-rc-submit ${canDo('rc.edit') ? '' : 'disabled title="Requires TGMSIDC User role"'}>Submit for RC approval (lock) →</button>` : '<span class="muted">Record locked pending GM / SO.</span>'}
       </div>
       ${!canDo('rc.edit') && !r.locked ? '<div class="muted">🔒 Section editing needs TGMSIDC User role — you have read-only access.</div>' : ''}
-      <h3 class="subhead">Lifecycle (RC Management)</h3>
-      <div class="form-actions" style="justify-content:flex-start;flex-wrap:wrap">
-        <button class="secondary" data-rc-amend ${canDo('rc.edit') ? '' : 'disabled title="Requires TGMSIDC User role"'}>✎ Amend (new version)</button>
-        <button class="primary" data-rc-renew ${canDo('rc.edit') ? '' : 'disabled title="Requires TGMSIDC User role"'}>♻ Renew (successor + link)</button>
+      </div>
+
+      <div class="phase-card"><div class="phase-head"><h3>Stage 3: Executive Approval &amp; Lifecycle</h3><span class="badge blue">GM · SO · Amend / Renew / Close</span></div>
+      <div class="form-actions" style="justify-content:flex-start;flex-wrap:wrap;border-top:0;margin-top:0;padding-top:0">
+        ${r.submitStatus && !r.gmDecision ? `<label class="muted">GM note<input id="rcGmNote" value="${esc(r.gmNote)}" style="width:220px;min-height:36px;border:1px solid #d8e0ea;border-radius:7px;padding:0 8px" ${gmOk ? '' : 'disabled'}></label><button class="primary" data-rc-gm="approve" ${gmOk ? '' : 'disabled title="Requires GM Equipment role"'}>GM: Propose Approve</button><button class="secondary" data-rc-gm="return" ${gmOk ? '' : 'disabled title="Requires GM Equipment role"'}>GM: Return</button><button class="danger" data-rc-gm="reject" ${gmOk ? '' : 'disabled title="Requires GM Equipment role"'}>GM: Reject</button>${gmOk ? '' : '<div class="muted">🔒 GM decision needs GM Equipment role.</div>'}` : ''}
+        ${r.gmDecision === 'Proposed to Approve' && !r.soDecision ? `<label class="muted">SO note<input id="rcSoNote" value="${esc(r.soNote)}" style="width:220px;min-height:36px;border:1px solid #d8e0ea;border-radius:7px;padding:0 8px" ${soOk ? '' : 'disabled'}></label><button class="primary" data-rc-so="approve" ${soOk ? '' : 'disabled title="Requires SO Equipment role"'}>SO: Approve → Active</button><button class="secondary" data-rc-so="return" ${soOk ? '' : 'disabled title="Requires SO Equipment role"'}>SO: Return</button><button class="danger" data-rc-so="reject" ${soOk ? '' : 'disabled title="Requires SO Equipment role"'}>SO: Reject</button>${soOk ? '' : '<div class="muted">🔒 SO decision needs SO Equipment role.</div>'}` : ''}
+        ${!r.submitStatus ? '<span class="muted">GM and SO actions appear after submit locks the record.</span>' : ''}
+        <button class="secondary" data-rc-amend ${canDo('rc.edit') ? '' : 'disabled title="Requires TGMSIDC User role"'}>✎ Amend</button>
+        <button class="primary" data-rc-renew ${canDo('rc.edit') ? '' : 'disabled title="Requires TGMSIDC User role"'}>♻ Renew</button>
         <button class="secondary" data-rc-close ${canDo('rc.edit') ? '' : 'disabled title="Requires TGMSIDC User role"'}>Close</button>
-      </div><div class="muted">Amend = version + re-approval · Renew creates successor RC linked to predecessor · Cancel (Step 16) keeps audit + re-tender linkage.</div>
-      <h3 class="subhead">Versions &amp; amendments (${(r.versions || []).length})</h3>${(r.versions || []).map((x) => `<div class="activity"><span class="check">v${x.v}</span><div><b>${esc(x.note)}</b><small>${esc(x.approval)}</small></div></div>`).join('')}`);
+      </div>
+      <div class="phase-sec">Versions (${(r.versions || []).length})</div>
+      ${(r.versions || []).map((x) => `<div class="activity"><span class="check">v${x.v}</span><div><b>${esc(x.note)}</b><small>${esc(x.approval)}</small></div></div>`).join('') || '<div class="muted">No versions yet.</div>'}
+      </div>`);
   }
   /* ============ 7. PO generation (5) + approval (6) + amend/cancel (7) ===== */
   let poSel = 'PO/2026/00452';
@@ -1298,6 +1321,26 @@
       r.tender = { ref, date: $('#rcTDate').val() || '', type: $('#rcTType').val(), portal: $('#rcTPortal').val(), openingDate: r.tender.openingDate, bidStart: r.tender.bidStart, bidEnd: r.tender.bidEnd, remarks: r.tender.remarks };
       r.tenderHistory.push(`Tender ${ref} entered (${r.tender.portal})`);
       audit('Rate Contract', `Step 6: Tender ${ref} | ${r.tender.date} | ${r.tender.type} on ${r.tender.portal} — Status Active`, r.no); DB.save(); renderRCs(); toast(`Tender ${ref} tracked → Step 7 stages`); });
+    $(document).on('click', '[data-rc-phase1]', () => { if (!needAny(['rc.create', 'rc.edit'], 'TGMSIDC User role')) return; const r = rcCur();
+      if (r.locked) return toast('This RC is locked for approval', 'err');
+      if ($('#rcEq').length) { if (!canDo('rc.create')) return toast('Initiation needs the TGMSIDC User role', 'err');
+        const pick = $('#rcEq').val(); const wname = ($('#rcEqW').val() || '').trim(); const name = pick === '__WRITEIN__' ? wname : pick;
+        if (!name) return toast('Enter write-in equipment name or pick from master', 'err');
+        const dup = rcActiveDup(name, r.no); if (dup) return toast(`Duplicate blocked: active ${dup.no} already covers ${name}`, 'err');
+        const m = window.DEMS_MASTERS.EQUIPMENT_MASTER.find((x) => x.name === name);
+        r.equipment = name; r.category = $('#rcCat').val() || (m && m.category) || 'General'; r.department = $('#rcDept').val() || (m && m.dept) || 'General';
+        r.indentRef = $('#rcInd').val() || ''; r.equipFlag = m ? 'Existing – Specs Available' : 'New – Specs Required'; }
+      const ref = ($('#rcTRef').val() || '').trim();
+      if (!ref) return toast('Tender reference number is required', 'err');
+      if (DB.data.rcs.some((x) => x.no !== r.no && (x.tender || {}).ref === ref)) return toast('Tender ref must be unique in our system', 'err');
+      const openingDate = $('#rs_opened_openingDate').val() || '', bidStart = $('#rs_opened_bidStart').val() || '', bidEnd = $('#rs_opened_bidEnd').val() || '', remarks = $('#rs_opened_remarks').val() || '';
+      if (bidStart && bidEnd && bidEnd < bidStart) return toast('Bid end must be on or after bid start', 'err');
+      r.tender = { ref, date: $('#rcTDate').val() || '', type: $('#rcTType').val(), portal: $('#rcTPortal').val(), openingDate, bidStart, bidEnd, remarks };
+      Object.assign(r.stages.opened, { openingDate, bidStart, bidEnd, remarks, done: !!openingDate });
+      if (openingDate) r.tenderStage = 'Tender Opened';
+      r.tenderHistory.push(`Phase 1 saved — tender ${ref}`);
+      audit('Rate Contract', `Phase 1: initiation + tender ${ref} on ${r.tender.portal}`, r.no); DB.save(); renderRCs();
+      toast(openingDate ? 'Initiation and tender details saved' : 'Tender details saved — add the opening date to finish Stage 1'); });
     // Steps 7–15: stage tracker
     $(document).on('click', '[data-rc-stage]', (e) => { if (!need('rc.edit', 'TGMSIDC User role')) return; const r = rcCur(); const key = $(e.currentTarget).data('rc-stage'); const s = r.stages[key];
       $(`[id^="rs_${key}_"]`).each((_, el) => { const f = el.id.replace(`rs_${key}_`, ''); s[f] = el.type === 'number' ? (+el.value || 0) : el.value; });
