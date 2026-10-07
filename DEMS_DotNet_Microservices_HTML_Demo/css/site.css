@@ -140,6 +140,9 @@ td small{display:block;color:var(--muted);font-size:12px}
 .upload{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
 .upload>div{border:1px dashed #c4d2e1;border-radius:8px;padding:12px;background:#fafcfe;position:relative;font-size:12px}
 .drop{border:1px dashed var(--blue);border-radius:8px;padding:12px;background:#f2f7ff;color:var(--blue);font-weight:700;text-align:center;cursor:pointer;font-size:12px}
+.doc-attach{display:grid;grid-template-columns:minmax(220px,1fr) minmax(220px,1fr);gap:12px;align-items:end;margin:8px 0 12px}
+.doc-attach label{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3d5166;min-width:0}
+.doc-attach select,.doc-attach input[type=file]{display:block;width:100%;margin:0;background:#fff;border:1px solid #d8e0ea;border-radius:7px;padding:6px 10px;position:relative;z-index:1}
 .form-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px;padding-top:8px;border-top:1px solid #edf0f3;flex-wrap:wrap}
 .form-err{color:var(--red);font-size:12px;min-height:18px;margin-top:8px}
 .eq-row{display:grid;grid-template-columns:2fr 2fr .6fr .8fr auto;gap:8px;margin-bottom:8px}
@@ -186,7 +189,7 @@ td small{display:block;color:var(--muted);font-size:12px}
 .rowbtn.on{background:#e6efff;border-color:#7ca9df;color:#184a86}
 @media(max-width:1100px){.appr-grid{grid-template-columns:1fr}}
 @media(max-width:1100px){.eq-top{grid-template-columns:1fr 1fr}.eq-head{display:none}}
-@media(max-width:760px){.eq-top{grid-template-columns:1fr}.con-row{grid-template-columns:1fr}.indent-spec{grid-template-columns:1fr}}
+@media(max-width:760px){.eq-top{grid-template-columns:1fr}.con-row{grid-template-columns:1fr}.indent-spec{grid-template-columns:1fr}.doc-attach{grid-template-columns:1fr}}
 /* ---------- workflow / detail ---------- */
 .detail-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}
 .detail-top small{color:var(--muted);font-size:10px;letter-spacing:.6px}.detail-top h2{margin:4px 0;font-size:20px}.detail-top p{color:var(--muted);margin:0;font-size:12px}

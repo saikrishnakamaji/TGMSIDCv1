@@ -969,13 +969,17 @@
       <div class="form-actions" style="justify-content:flex-start;margin-top:8px"><button class="secondary" data-rc-price ${dis}>Save pricing + CAMC</button></div>`)}
 
       ${p2Gate(r, 'docs', '21 · Documents & submit', `<div class="phase-sec">Document checklist · contract + BFC approval required</div>
-      <div class="upload">${r.docs.map((d, di) => `<div>📄 <b>${esc(d.name)}</b><small>${esc(d.kind)}${d.sizeMB ? ' · ' + d.sizeMB + ' MB' : ''}</small><button class="rowbtn" data-rc-docdel="${di}" ${canDo('rc.edit') ? '' : 'disabled'} style="position:absolute;right:8px;top:8px">✕</button></div>`).join('')}<label class="drop">＋ Upload<select id="rcDocKind" style="min-height:28px;margin:4px 0">${RC_DOC_KINDS.map((k) => `<option>${k}</option>`).join('')}</select><input type="file" id="rcDocFile" hidden accept=".pdf,.jpg,.jpeg,.png"></label></div>
+      <div class="doc-attach">
+        <label>Document type<select id="rcDocKind">${RC_DOC_KINDS.map((k) => `<option>${k}</option>`).join('')}</select></label>
+        <label>Attachment (PDF, JPG, PNG)<input type="file" id="rcDocFile" accept=".pdf,.jpg,.jpeg,.png"></label>
+      </div>
+      <div class="upload">${r.docs.map((d, di) => `<div>📄 <b>${esc(d.name)}</b><small>${esc(d.kind)}${d.sizeMB ? ' · ' + d.sizeMB + ' MB' : ''}</small><button class="rowbtn" data-rc-docdel="${di}" ${canDo('rc.edit') ? '' : 'disabled'} style="position:absolute;right:8px;top:8px">✕</button></div>`).join('') || '<div class="muted">No files yet. Choose Signed contract copy, then pick the file beside it.</div>'}</div>
 
       <div class="phase-sec">Submission readiness</div>
       <div class="review-box"><b>Checklist</b> ${[['Specs finalized', r.specsFinal], ['Tender ref entered', !!(r.tender && r.tender.ref)], ['BFC approved Yes', r.stages.bfcdec.yes === 'Yes'], ['Header valid (end>start)', !!(r.header.start && r.header.end && r.header.end > r.header.start)], ['L1 pricing entered', (r.pricing || []).some((p) => +p.rateEx > 0)], ['Contract copy attached', (r.docs || []).some((d) => d.kind === 'Signed contract copy')], ['BFC approval attached', (r.docs || []).some((d) => /BFC approval/.test(d.kind))]].map(([l, ok]) => `<div class="${ok ? 'ok-tx' : 'bad-tx'}">${ok ? '✓' : '○'} ${l}</div>`).join('')}
       ${r.submitStatus ? `Submitted → <b>${esc(r.submitStatus)}</b> · locked · GM: <b>${esc(r.gmDecision || '—')}</b> · SO: <b>${esc(r.soDecision || '—')}</b>` : ''}</div>
       <div class="form-actions" style="justify-content:flex-start;flex-wrap:wrap">
-        ${!r.submitStatus ? `<button class="primary" data-rc-submit ${canDo('rc.edit') ? '' : 'disabled title="Requires TGMSIDC User role"'}>Submit for RC approval (lock) →</button>` : '<span class="muted">Record locked pending GM / SO.</span>'}
+        ${!r.submitStatus ? `<button class="primary" data-rc-submit ${canDo('rc.edit') ? '' : 'disabled title="Requires TGMSIDC User role"'}>Save &amp; continue to PO →</button>` : '<span class="muted">Record locked pending GM / SO.</span>'}
       </div>
       ${!canDo('rc.edit') && !r.locked ? '<div class="muted">🔒 Section editing needs TGMSIDC User role — you have read-only access.</div>' : ''}`)}
       </div>
@@ -1490,12 +1494,28 @@
       audit('Rate Contract', `Steps 19–20: pricing L1 ₹${L1.rateEx}+${L1.gst}% + CAMC ${r.camc.applicable} ${r.camc.years}Y`, r.no); DB.save(); renderRCs(); toast(`${r.no} pricing + CAMC saved (rate history kept)`); });
     // Step 22: submit (lock)
     $(document).on('click', '[data-rc-submit]', () => { if (!need('rc.edit', 'TGMSIDC User role')) return; const r = rcCur();
-      const checks = [r.specsFinal, !!r.tender.ref, r.stages.bfcdec.yes === 'Yes', !!(r.header.start && r.header.end && r.header.end > r.header.start), (r.pricing || []).some((p) => +p.rateEx > 0), (r.docs || []).some((d) => d.kind === 'Signed contract copy'), (r.docs || []).some((d) => /BFC approval/.test(d.kind))];
+      const hasContract = (r.docs || []).some((d) => d.kind === 'Signed contract copy');
+      const hasBfc = (r.docs || []).some((d) => /BFC approval/.test(d.kind));
+      if (!hasContract) return toast('Attach the contract copy first: set Document type to Signed contract copy, then choose the file', 'err');
+      if (!hasBfc) return toast('Attach the BFC approval document as well', 'err');
+      const checks = [r.specsFinal, !!r.tender.ref, r.stages.bfcdec.yes === 'Yes', !!(r.header.start && r.header.end && r.header.end > r.header.start), (r.pricing || []).some((p) => +p.rateEx > 0), hasContract, hasBfc];
       if (checks.some((x) => !x)) return toast('Submit checklist incomplete — finish specs, BFC-Yes, header, L1 pricing, contract + BFC docs', 'err');
       r.submitStatus = 'Pending RC Approval'; r.locked = true;
       audit('Rate Contract', `Step 22: Submitted → Pending RC Approval (locked, ${nowStamp()}) — full trail: specs → tender → BFC → pricing`, r.no);
       DB.data.notifications.unshift({ t: `${r.no} submitted for RC approval — notified GM Equipment + ED`, age: 'now', urgent: true });
-      DB.save(); renderRCs(); toast(`${r.no} submitted — locked, GM/ED notified`); });
+      let p = DB.data.pos.find((x) => x.rc === r.no && x.status !== 'Cancelled');
+      if (!p) {
+        const ind = DB.data.indents.find((x) => x.id === r.indentRef) || DB.data.indents.find((x) => /Approved/i.test(x.status)) || DB.data.indents[0];
+        const line = indentLine(ind);
+        const L1 = (r.pricing || [])[0] || {};
+        const n = `PO/2026/00${453 + DB.data.pos.length}`;
+        p = { no: n, indent: ind ? ind.id : '', rc: r.no, equipment: r.equipment, lines: [{ vendor: L1.vendor || r.vendor || 'ABC Medical Systems', rank: 'L1', qty: (line && line.qty) || L1.maxQty || 1, rate: +L1.rateEx || +r.basicRate || 0 }], valueLakh: 0, gstPct: +L1.gst || +r.gstPct || 12, perfSecurity: '5% bank guarantee', tc: (window.DEMS_MASTERS.LOOKUPS.tcTemplates || ['Standard Medical Equipment T&C v3'])[0], consignees: (line && line.consignees && line.consignees.length) ? line.consignees : [{ institution: ind ? ind.facility : '', qty: (line && line.qty) || 1 }], approval: 'GM Proposed', chain: { gm: 'Proposed', so: 'Pending', ed: 'Pending' }, status: 'Draft', ack: 'Pending', versions: [{ v: 1, note: 'Generated from ' + r.no, approval: 'GM Proposed' }], anomalies: [], indentQtyFreed: 0 };
+        p.valueLakh = +(poCalc(p).total / 100000).toFixed(2);
+        DB.data.pos.unshift(p);
+        audit('Purchase Order', 'Opened from RC submission ' + r.no, n);
+      }
+      poSel = p.no;
+      DB.save(); renderRCs(); openPage('po'); toast(`${r.no} saved — ${p.no} is ready`); });
     // Step 23: GM propose
     $(document).on('click', '[data-rc-gm]', (e) => { if (!need('rc.gm', 'GM Equipment role')) return; const r = rcCur(); const act = $(e.currentTarget).data('rc-gm'); r.gmNote = $('#rcGmNote').val() || '';
       if (!r.submitStatus) return toast('Submit the RC (Step 22) first', 'err');
