@@ -143,6 +143,23 @@ td small{display:block;color:var(--muted);font-size:12px}
 .doc-attach{display:grid;grid-template-columns:minmax(220px,1fr) minmax(220px,1fr);gap:12px;align-items:end;margin:8px 0 12px}
 .doc-attach label{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3d5166;min-width:0}
 .doc-attach select,.doc-attach input[type=file]{display:block;width:100%;margin:0;background:#fff;border:1px solid #d8e0ea;border-radius:7px;padding:6px 10px;position:relative;z-index:1}
+.bi-filters{padding:10px 12px;margin-bottom:12px}
+.bi-kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:12px}
+.bi-kpis .kpi{padding:10px 12px}
+.bi-kpis .kpi strong{font-size:20px}
+.bi-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px}
+.bi-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px 8px;box-shadow:var(--shadow);min-width:0}
+.bi-card h3{margin:0;font-size:15px;font-weight:700;color:#123a6b}
+.bi-card p{margin:2px 0 8px;font-size:12px;color:#3d5166}
+.bi-plot{position:relative;height:220px}
+.bi-plot-lg{height:250px}
+.bi-span2{grid-column:span 2}
+.bi-span3{grid-column:span 3}
+.bi-gridcard{padding:12px 14px}
+.bi-chip{display:inline-flex;align-items:center;gap:8px;background:#e9f1ff;color:#184a86;border-radius:20px;padding:4px 10px;font-size:13px;font-weight:700}
+.bi-chip button{border:0;background:transparent;color:#184a86;min-height:0;font-weight:800;padding:0 2px}
+@media(max-width:1100px){.bi-kpis{grid-template-columns:repeat(3,1fr)}.bi-grid{grid-template-columns:1fr 1fr}.bi-span2,.bi-span3{grid-column:span 2}}
+@media(max-width:760px){.bi-kpis,.bi-grid{grid-template-columns:1fr}.bi-span2,.bi-span3{grid-column:span 1}.bi-plot,.bi-plot-lg{height:200px}}
 .po-compare{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:8px}
 @media(max-width:760px){.po-compare{grid-template-columns:1fr}}
 .form-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px;padding-top:8px;border-top:1px solid #edf0f3;flex-wrap:wrap}
@@ -290,6 +307,8 @@ table.eq-table th{background:#eef3f8}
 table.eq-table td{vertical-align:middle}
 table.eq-table input,table.eq-table select{width:100%;border:1px solid #d8e0ea;border-radius:7px;padding:7px 8px;font-size:12px;background:#fff}
 table.eq-table td b{font-size:12.5px}table.eq-table td small{display:block;color:var(--muted);font-size:10.5px}
+table.eq-table tfoot td{background:#f4f7fb;font-weight:700;color:#123a6b;border-top:2px solid #d5e0ea}
+table.eq-table .eq-total{color:#123a6b;font-weight:800;white-space:nowrap}
 .warn-tx{color:#c9820e;font-weight:600}
 @media(max-width:760px){.inst-pick{grid-template-columns:1fr}.wstep b small{display:none}}
 /* RC two-phase workspace */

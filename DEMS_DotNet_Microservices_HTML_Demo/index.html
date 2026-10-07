@@ -166,11 +166,30 @@
 
       <!-- REPORTS (11) -->
       <section class="page" id="page-reports">
-        <div class="page-head"><div><h1>Reports &amp; Analytics</h1><p>15 configurable reports + 12 KPI dashboards · drill-down · filters · Excel/PDF</p></div>
+        <div class="page-head"><div><h1>Reports &amp; Analytics</h1><p>Procurement BI · stage, funnel, spend and SLA · click a chart to filter the grid</p></div>
           <div><button class="secondary" id="btnPrint">Export PDF</button> <button class="primary" id="btnCsv">Export Excel</button></div></div>
-        <div class="card"><div class="filters"><select id="repFY"><option>FY 2026-27</option><option>FY 2025-26</option></select><select><option>All Districts</option></select><select><option>All Departments</option></select><select id="repVendor"><option>All Vendors</option><option>ABC Medical Systems</option><option>XYZ Healthcare</option><option>MedEquip India</option></select><select><option>All Equipment</option></select><select id="repStatus"><option>All Status</option><option>Submitted</option><option>Verified</option><option>Approved</option><option>Delivered</option><option>Accepted</option></select><button class="primary" id="reportApply">Apply Filters</button></div></div>
-        <h3 class="subhead">KPI dashboards (12)</h3><div class="kpis" id="kpiGrid" style="grid-template-columns:repeat(4,1fr)"></div>
-        <h3 class="subhead">MIS reports (15)</h3><div class="report-grid" id="reportGrid"></div>
+        <div class="card bi-filters"><div class="filters">
+          <select id="repFY"><option>FY 2026-27</option><option>FY 2025-26</option></select>
+          <select id="repDistrict"><option>All Districts</option><option>Hyderabad</option><option>Medchal</option><option>Nizamabad</option><option>Warangal</option><option>Karimnagar</option></select>
+          <select id="repDept"><option>All Departments</option><option>ICU</option><option>General</option><option>Radiology</option><option>Nephrology</option><option>Anaesthesia</option></select>
+          <select id="repStatus"><option>All Status</option><option>Draft</option><option>Verified</option><option>Approved</option><option>Rejected</option></select>
+          <select id="repVendor"><option>All Vendors</option><option>ABC Medical Systems</option><option>XYZ Healthcare</option><option>MedEquip India</option></select>
+          <select id="repCatalog"><option value="">Open an MIS report…</option></select>
+          <button class="primary" id="reportApply">Apply Filters</button>
+        </div></div>
+        <div class="bi-kpis" id="kpiGrid"></div>
+        <div class="bi-grid">
+          <article class="bi-card"><h3>Indent stage</h3><p>Draft, verified, approved, rejected</p><div class="bi-plot"><canvas id="chStage"></canvas></div></article>
+          <article class="bi-card"><h3>RC vs Tender</h3><p>Route mix with center total</p><div class="bi-plot"><canvas id="chMode"></canvas></div></article>
+          <article class="bi-card"><h3>Procurement funnel</h3><p id="chFunnelNote">Indent through PO, with drop-off</p><div class="bi-plot"><canvas id="chFunnel"></canvas></div></article>
+          <article class="bi-card bi-span2"><h3>Budget vs actual</h3><p>Monthly actual stacked by district, budget as the line</p><div class="bi-plot bi-plot-lg"><canvas id="chSpend"></canvas></div></article>
+          <article class="bi-card"><h3>Top categories</h3><p>Equipment value, ₹ lakh</p><div class="bi-plot"><canvas id="chCat"></canvas></div></article>
+          <article class="bi-card bi-span3"><h3>Approval SLA and review TAT</h3><p>Share of reviews inside 7 days, and average days, by quarter</p><div class="bi-plot bi-plot-lg"><canvas id="chSla"></canvas></div></article>
+        </div>
+        <div class="card bi-gridcard">
+          <div class="card-head"><h3 id="biGridTitle">Drill-down</h3><span id="biChip" class="muted"></span></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Reference</th><th>Facility</th><th>District</th><th>Department</th><th>Stage</th><th>Route</th><th>Category</th><th>Value ₹L</th><th>TAT</th><th>SLA</th></tr></thead><tbody id="biRows"></tbody></table></div>
+        </div>
       </section>
 
       <!-- AUDIT -->
@@ -188,6 +207,7 @@
 <div class="toast" id="toast"></div>
 <input type="file" id="hiddenFile" hidden>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
 <script src="js/data.js"></script>
 <script src="js/app.js"></script>
 </body>

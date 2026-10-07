@@ -283,7 +283,12 @@
   const opt = (list, cur) => list.map((o) => `<option ${o === cur ? 'selected' : ''}>${esc(o)}</option>`).join('');
   const docName = (d) => typeof d === 'string' ? d : d.name;
   const docTypeOf = (d) => typeof d === 'string' ? 'Administrative Approval' : (d.type || 'Administrative Approval');
-  function wizTotal() { return wiz.items.reduce((a, i) => a + (+i.cost || 0), 0); }
+  function lineEst(it) {
+    const qty = +it.qty || 0;
+    if (it.unitCost != null && it.unitCost !== '') return qty * (+it.unitCost || 0);
+    return +it.cost || 0;
+  }
+  function wizTotal() { return wiz.items.reduce((a, i) => a + lineEst(i), 0); }
   function consigneSum(it) { return (it.consignees || []).reduce((a, c) => a + (+c.qty || 0), 0); }
   function fundFor(inst) { let f = wiz.funds.find((x) => x.institution === inst); if (!f) { f = { institution: inst, sanctioned: 0, sanctionDate: '', deposited: 0, utr: '', depositDate: '' }; wiz.funds.push(f); } return f; }
   function syncConsignees() { wiz.items.forEach((it) => { it.consignees = it.consignees || []; wiz.institutions.forEach((n) => { if (!it.consignees.find((c) => c.institution === n)) it.consignees.push({ institution: n, qty: 0 }); }); it.consignees = it.consignees.filter((c) => wiz.institutions.includes(c.institution)); }); }
@@ -403,30 +408,43 @@
       ${wizNav()}`;
   }
   /* S3 · Equipment entry table — columns: # | Equipment Name | Specification |
-   * Quantity | Est ₹L | Source | Action. Rows are added from the toolbar
-   * (dept filter → master pick → Add row) or as free-text write-ins. */
+   * Quantity | Cost ₹L (unit) | Total ₹L (qty × cost) | Source | Action.
+   * Rows are added from the toolbar (dept filter → master pick → Add row)
+   * or as free-text write-ins. Estimated cost under the table is the sum. */
+  function ensureUnitCost(e) {
+    if (e.unitCost != null && e.unitCost !== '') return +e.unitCost || 0;
+    const qty = +e.qty || 0;
+    const unit = qty > 0 ? (+e.cost || 0) / qty : (+e.cost || 0);
+    e.unitCost = +unit.toFixed(4);
+    e.cost = +((qty || 0) * e.unitCost).toFixed(2);
+    return e.unitCost;
+  }
   function wizStep3() {
     const opts = wizMasterOpts(-1);
-    return `<h3 class="subhead" style="margin-top:0">Step 3 · Equipment entry table <small style="color:#6f7f93">filtered by department + facility type · spec auto-fills from master</small></h3>
+    wiz.items.forEach(ensureUnitCost);
+    return `<h3 class="subhead" style="margin-top:0">Step 3 · Equipment entry table <small style="color:#6f7f93">filtered by department + facility type · spec auto-fills from master · total = quantity × cost</small></h3>
       <div class="eq-toolbar">
         <label>Dept filter<select id="wDeptF"><option value="">All departments</option>${opt(DEPTS, wiz.deptFilter || '')}</select></label>
         <label style="flex:1;min-width:220px">Equipment master${opts ? '' : ' (none for this dept/facility)'}<select id="wMasterPick">${opts ? `<option value="">— Select equipment to add —</option>${opts}` : '<option value="">— none for this dept/facility —</option>'}</select></label>
         <button class="primary" data-tradd style="align-self:flex-end">＋ Add row</button>
         <button class="secondary" data-trwritein style="align-self:flex-end" title="Free-text entry — flagged Unverified, resolved by TGMSIDC">✎ Write-in</button>
       </div>
-      <div class="muted" style="margin:8px 0">Not in master? → <b>✎ Write-in</b> adds a free-text row (flagged Unverified – Pending Master Mapping, resolved by TGMSIDC).</div>
-      <div class="tbl-wrap"><table class="eq-table"><thead><tr><th style="width:36px">#</th><th>Equipment Name</th><th>Specification</th><th style="width:92px">Quantity</th><th style="width:96px">Est ₹L</th><th style="width:120px">Source</th><th style="width:64px">Action</th></tr></thead><tbody>
-      ${wiz.items.map((e, i) => `<tr data-trow="${i}">
+      <div class="muted" style="margin:8px 0">Not in master? → <b>✎ Write-in</b> adds a free-text row (flagged Unverified – Pending Master Mapping, resolved by TGMSIDC). Cost is ₹ lakh per unit; Total updates as you type.</div>
+      <div class="tbl-wrap"><table class="eq-table"><thead><tr><th style="width:36px">#</th><th>Equipment Name</th><th>Specification</th><th style="width:92px">Quantity</th><th style="width:100px">Cost ₹L</th><th style="width:110px">Total ₹L</th><th style="width:120px">Source</th><th style="width:64px">Action</th></tr></thead><tbody>
+      ${wiz.items.map((e, i) => { const unit = ensureUnitCost(e); const line = (+e.qty || 0) * unit; return `<tr data-trow="${i}">
         <td><span class="eq-n">${i + 1}</span></td>
         <td>${e.writeIn ? `<input data-trname="${i}" value="${esc(e.equipment)}" placeholder="Write-in equipment name *" style="border-color:#c9820e">` : (e.masterCode ? `<b>${esc(e.equipment)}</b><small>${esc(e.masterCode)}${e.dept ? ' · ' + esc(e.dept) : ''}</small>` : `<select data-trsel="${i}"><option value="">— select —</option>${wizMasterOpts(i)}</select>`)}</td>
         <td><input data-trspec="${i}" value="${esc(e.spec)}" placeholder="Specification (long-text) *"></td>
-        <td><input type="number" min="1" value="${e.qty}" data-trqty="${i}" style="width:76px"></td>
-        <td><input type="number" min="0" step="0.1" value="${e.cost}" data-trcost="${i}" style="width:84px"></td>
+        <td><input type="number" min="1" value="${e.qty}" data-trqty="${i}"></td>
+        <td><input type="number" min="0" step="0.01" value="${unit}" data-trcost="${i}" title="Cost per unit, ₹ lakh"></td>
+        <td><b class="eq-total" data-trtotal="${i}">${line.toFixed(2)}</b></td>
         <td>${e.writeIn ? '<span class="writein-flag" style="margin:0">✎ Unverified</span>' : (e.masterCode ? `<span class="master-flag" style="margin:0">${esc(e.masterCode)}</span>` : '<span class="muted">—</span>')}</td>
         <td><button class="rowbtn" data-tedel="${i}" title="Remove row">✕</button></td>
-      </tr>`).join('') || '<tr><td colspan="7"><div class="muted">No rows yet — pick equipment above and Add row, or add a Write-in.</div></td></tr>'}
-      </tbody></table></div>
-      <div class="review-box" style="margin-top:10px"><b>Estimated total: ₹${wizTotal().toFixed(2)} L</b> · ${wiz.items.length} row(s)${wiz.items.some((x) => x.writeIn) ? ' · <span class="warn-tx">contains write-in rows</span>' : ''}</div>
+      </tr>`; }).join('') || '<tr><td colspan="8"><div class="muted">No rows yet — pick equipment above and Add row, or add a Write-in.</div></td></tr>'}
+      </tbody>
+      ${wiz.items.length ? `<tfoot><tr><td colspan="5" style="text-align:right">Estimated cost</td><td><b class="eq-total" id="wizEstFoot">${wizTotal().toFixed(2)}</b></td><td colspan="2" class="muted">₹ lakh</td></tr></tfoot>` : ''}
+      </table></div>
+      <div class="review-box" style="margin-top:10px"><b>Estimated cost: <span id="wizEstTotal">₹${wizTotal().toFixed(2)} L</span></b> · ${wiz.items.length} row(s) · quantity × unit cost${wiz.items.some((x) => x.writeIn) ? ' · <span class="warn-tx">contains write-in rows</span>' : ''}</div>
       ${wizNav()}`;
   }
   /* S4 · Allocation & Funds — qty matrix per institution (row totals must
@@ -457,9 +475,9 @@
     const c = fullCheck();
     return `<h3 class="subhead" style="margin-top:0">Step 5 · Review & submit <small style="color:#6f7f93">decision point — fix errors, save draft, or submit</small></h3>
       <div class="review-box"><b>${esc(wiz.institutions[0] || '—')}${wiz.institutions.length > 1 ? ' +' + (wiz.institutions.length - 1) + ' more' : ''}</b> · ${esc(wiz.type)} · Ref ${esc(wiz.refNo)} · ${esc(wiz.fy)}<br>
-      ${wiz.items.map((it) => `• ${esc(it.equipment || '(unnamed)')} × ${it.qty} → ${(it.consignees || []).filter((x) => +x.qty > 0).map((x) => esc(x.institution) + ' (' + x.qty + ')').join(' + ')} — ₹${it.cost} L${it.writeIn ? ' <b class="warn-tx">[write-in]</b>' : ''}`).join('<br>')}<br><br>
+      ${wiz.items.map((it) => { const unit = it.unitCost != null && it.unitCost !== '' ? +it.unitCost : ((+it.qty > 0) ? (+it.cost || 0) / +it.qty : 0); const line = lineEst(it); return `• ${esc(it.equipment || '(unnamed)')} × ${it.qty} → ${(it.consignees || []).filter((x) => +x.qty > 0).map((x) => esc(x.institution) + ' (' + x.qty + ')').join(' + ')} — ₹${unit.toFixed(2)} × ${it.qty} = ₹${line.toFixed(2)} L${it.writeIn ? ' <b class="warn-tx">[write-in]</b>' : ''}`; }).join('<br>')}<br><br>
       Fund: ${esc(wiz.programme)} · ${esc(wiz.source)} · ${esc(wiz.head)} · sanctioned ₹${wiz.funds.reduce((a, f) => a + (+f.sanctioned || 0), 0).toFixed(1)} L<br>
-      Docs: ${wiz.docs.map((d) => esc(docName(d))).join(', ') || '<b class="bad-tx">MISSING</b>'}<br><b>Estimated total: ₹${wizTotal().toFixed(2)} L</b></div>
+      Docs: ${wiz.docs.map((d) => esc(docName(d))).join(', ') || '<b class="bad-tx">MISSING</b>'}<br><b>Estimated cost: ₹${wizTotal().toFixed(2)} L</b></div>
       <div class="review-box" style="margin-top:10px"><b>Validation report</b><br>${c.checks.map((x) => `<div class="${x.ok ? (x.warn ? 'warn-tx' : 'ok-tx') : 'bad-tx'}">${x.ok ? (x.warn ? '⚠' : '✓') : '○'} ${esc(x.label)} ${!x.ok ? `<button class="rowbtn" data-wiz-fix="${x.fix}">Go to Step ${x.fix}</button>` : ''}</div>`).join('')}</div>
       ${c.errs.length ? `<div class="form-err">${c.errs.map(esc).join('<br>')}</div>` : '<div class="ok-tx" style="margin-top:10px"><b>✓ Validation passed</b> — submitting locks the indent and notifies TGMSIDC. Saving as draft keeps it in your dashboard queue only (TGMSIDC cannot see drafts; STALE after 30 days).</div>'}
       <div class="form-actions" style="justify-content:space-between;margin-top:16px"><button class="secondary" data-wiz-nav="back">← Back</button><span><button class="secondary" data-wiz-draft>💾 Save as Draft</button> <button class="primary" data-wiz-submit ${c.errs.length ? 'disabled title="Fix errors first"' : ''}>✓ Confirm Submit → TGMSIDC Review</button></span></div>`;
@@ -488,7 +506,8 @@
         if (it.writeIn) it.equipment = $(`[data-trname="${i}"]`).val() || '';
         it.spec = $(`[data-trspec="${i}"]`).val() || '';
         it.qty = +$(`[data-trqty="${i}"]`).val() || 0;
-        it.cost = +$(`[data-trcost="${i}"]`).val() || 0;
+        it.unitCost = +$(`[data-trcost="${i}"]`).val() || 0;
+        it.cost = +(it.qty * it.unitCost).toFixed(2);
       }
       (it.consignees || []).forEach((c) => { const el = $(`[data-mx="${i}|${c.institution}"]`); if (el.length) c.qty = +el.val() || 0; });
     });
@@ -1323,11 +1342,209 @@
     if (/Amendment/i.test(title)) return DB.data.pos.flatMap((p) => (p.versions || []).map((v) => [p.no, 'v' + v.v, v.note, v.approval]));
     return DB.data.indents.slice(0, 4).map((x) => [x.id, x.facility, '₹' + x.valueLakh + ' L', x.status]);
   }
+  let biFilter = null;
+  const biCharts = {};
+  const BI_COLORS = ['#2361a9', '#008b95', '#2c9a62', '#c9820e', '#c74a4a', '#5b4db3'];
+  const BI_MONTHS = ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
+  const BI_PIPES = ['Indent', 'Committee Specs', 'Tender/BFC', 'RC Award', 'PO Issuance'];
+  function biQuarter(month) { const i = BI_MONTHS.indexOf(month); return i < 3 ? 'Q1' : i < 6 ? 'Q2' : i < 9 ? 'Q3' : 'Q4'; }
+  function biStage(status) {
+    if (/Reject/i.test(status)) return 'Rejected';
+    if (/Draft|Return/i.test(status)) return 'Draft';
+    if (/Approv|Proposed/i.test(status)) return 'Approved';
+    return 'Verified';
+  }
+  function biMock(fy) {
+    const districts = ['Hyderabad', 'Medchal', 'Nizamabad', 'Warangal', 'Karimnagar'];
+    const depts = ['ICU', 'General', 'Radiology', 'Nephrology', 'Anaesthesia'];
+    const cats = ['Life Support', 'Diagnostic', 'Imaging', 'Monitoring', 'Surgical'];
+    const vendors = ['ABC Medical Systems', 'XYZ Healthcare', 'MedEquip India'];
+    const facilities = ['District Hospital', 'PHC', 'CHC', 'GMC', 'Area Hospital'];
+    return BI_MONTHS.flatMap((month, mi) => [0, 1, 2].map((k) => {
+      const i = mi * 3 + k;
+      const stage = i % 11 === 0 ? 'Rejected' : i % 6 === 0 ? 'Draft' : i % 4 === 0 ? 'Verified' : 'Approved';
+      const mode = i % 3 === 0 ? 'Tender' : 'RC';
+      const pipe = stage === 'Draft' ? 1 : stage === 'Rejected' ? 2 : stage === 'Verified' ? 2 : mode === 'Tender' ? 3 : (i % 5 === 0 ? 5 : 4);
+      const budget = 18 + (i % 6) * 6 + (fy === '2025-26' ? 4 : 0);
+      const actual = Math.round(budget * (0.55 + (i % 5) * 0.08));
+      const tat = 2 + (i % 10);
+      return { id: `BI-${fy.slice(2, 4)}-${String(i + 1).padStart(3, '0')}`, facility: `${facilities[i % 5]}, ${districts[i % 5]}`, district: districts[i % 5], dept: depts[k], stage, mode, category: cats[i % 5], month, quarter: biQuarter(month), budget, actual, tat, sla: tat <= 7 ? 'Met' : 'Breached', value: +actual.toFixed(1), fy, vendor: vendors[i % 3], pipe, status: stage };
+    }));
+  }
+  function biLive(fy) {
+    if (fy !== '2026-27') return [];
+    return (DB.data.indents || []).map((ind, i) => {
+      const item = (ind.items || [])[0] || {};
+      const stage = biStage(ind.status);
+      const mode = /Tender/i.test(item.mode || ind.status) ? 'Tender' : /Local/i.test(item.mode || '') ? 'Local' : 'RC';
+      const hasPo = (DB.data.pos || []).some((p) => p.indent === ind.id && !/Draft|Rejected|Cancelled/.test(p.status));
+      const pipe = stage === 'Draft' ? 1 : stage === 'Rejected' ? 2 : stage === 'Verified' ? 2 : hasPo ? 5 : mode === 'RC' ? 4 : 3;
+      const month = BI_MONTHS[i % 12];
+      const tat = 3 + (i % 8);
+      const value = +ind.valueLakh || 0;
+      return { id: ind.id, facility: ind.facility, district: ind.district || 'Hyderabad', dept: item.dept || 'General', stage, mode, category: item.dept === 'Radiology' ? 'Imaging' : item.dept === 'ICU' ? 'Life Support' : 'Diagnostic', month, quarter: biQuarter(month), budget: Math.max(value, 8), actual: value, tat, sla: tat <= 7 ? 'Met' : 'Breached', value, fy, vendor: mode === 'RC' ? 'ABC Medical Systems' : 'XYZ Healthcare', pipe, status: stage };
+    });
+  }
+  function biBase() {
+    const fy = /2025/.test($('#repFY').val() || '') ? '2025-26' : '2026-27';
+    const dist = $('#repDistrict').val() || 'All Districts';
+    const dept = $('#repDept').val() || 'All Departments';
+    const vendor = $('#repVendor').val() || 'All Vendors';
+    const status = $('#repStatus').val() || 'All Status';
+    return biMock(fy).concat(biLive(fy)).filter((r) => (dist === 'All Districts' || r.district === dist) && (dept === 'All Departments' || r.dept === dept) && (vendor === 'All Vendors' || r.vendor === vendor) && (status === 'All Status' || r.stage === status));
+  }
+  function biGridRows(base) {
+    if (!biFilter) return base;
+    return base.filter((r) => {
+      if (biFilter.dim === 'stage') return r.stage === biFilter.value;
+      if (biFilter.dim === 'mode') return r.mode === biFilter.value;
+      if (biFilter.dim === 'pipe') return r.pipe >= biFilter.value;
+      if (biFilter.dim === 'district') return r.district === biFilter.value;
+      if (biFilter.dim === 'category') return r.category === biFilter.value;
+      if (biFilter.dim === 'quarter') return r.quarter === biFilter.value;
+      return true;
+    });
+  }
+  function biToggle(dim, value) {
+    biFilter = biFilter && biFilter.dim === dim && biFilter.value === value ? null : { dim, value };
+    setTimeout(renderReports, 0);
+  }
+  function biDraw(id, cfg) {
+    const el = document.getElementById(id);
+    if (!el || !window.Chart) return;
+    if (biCharts[id]) biCharts[id].destroy();
+    biCharts[id] = new window.Chart(el, cfg);
+  }
   function renderReports() {
-    const CAT = window.DEMS_MASTERS.REPORT_CATALOG, KPI = window.DEMS_MASTERS.KPI_CATALOG;
-    const vf = ($('#repVendor').val() || 'All Vendors').replace('All Vendors', '').trim();
-    $('#kpiGrid').html(KPI.map(([t, v, d]) => `<div class="kpi"><div><small>${esc(t)}</small><strong>${esc(v)}</strong><span>${esc(d)} · ${esc($('#repFY').val() || 'FY 2026-27')}</span></div></div>`).join(''));
-    $('#reportGrid').html(CAT.map(([n, t, d]) => `<div class="report"><b>${n}</b><h3>${esc(t)}</h3><p>${esc(d)}${vf ? ` · ${esc(vf)}` : ''} · ${esc($('#repStatus').val() || 'All Status')}</p><button class="link" data-report="${esc(t)}">Open Report →</button></div>`).join(''));
+    if (window.Chart && !window.__biCenter) {
+      window.__biCenter = true;
+      window.Chart.register({ id: 'centerText', afterDraw(chart) {
+        const opt = chart.options.plugins && chart.options.plugins.centerText;
+        if (!opt || !chart.chartArea) return;
+        const { ctx, chartArea } = chart;
+        const x = (chartArea.left + chartArea.right) / 2;
+        const y = (chartArea.top + chartArea.bottom) / 2;
+        ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#123a6b'; ctx.font = '700 22px Segoe UI, sans-serif'; ctx.fillText(String(opt.total), x, y - 8);
+        ctx.fillStyle = '#3d5166'; ctx.font = '600 11px Segoe UI, sans-serif'; ctx.fillText(opt.label || '', x, y + 12); ctx.restore();
+      } });
+    }
+    if ($('#repCatalog option').length < 2) {
+      $('#repCatalog').append((window.DEMS_MASTERS.REPORT_CATALOG || []).map(([n, t]) => `<option value="${esc(t)}">${n} · ${esc(t)}</option>`).join(''));
+    }
+    const base = biBase();
+    const rows = biGridRows(base);
+    window.__biRows = rows;
+    const sum = (list, k) => list.reduce((a, r) => a + (+r[k] || 0), 0);
+    const slaPct = rows.length ? Math.round(100 * rows.filter((r) => r.sla === 'Met').length / rows.length) : 0;
+    const avgTat = rows.length ? (sum(rows, 'tat') / rows.length).toFixed(1) : '0';
+    $('#kpiGrid').html([
+      ['Records', rows.length, 'in this view'],
+      ['Value', '₹' + sum(rows, 'value').toFixed(0) + ' L', 'equipment'],
+      ['Budget', '₹' + sum(rows, 'budget').toFixed(0) + ' L', 'sanctioned'],
+      ['Actual', '₹' + sum(rows, 'actual').toFixed(0) + ' L', 'spent'],
+      ['Avg TAT', avgTat + ' d', 'review days'],
+      ['SLA met', slaPct + '%', 'within 7 days']
+    ].map(([t, v, d]) => `<div class="kpi"><div><small>${esc(t)}</small><strong>${esc(v)}</strong><span>${esc(d)}</span></div></div>`).join(''));
+    const stages = ['Draft', 'Verified', 'Approved', 'Rejected'];
+    const stageN = stages.map((s) => base.filter((r) => r.stage === s).length);
+    const modes = ['RC', 'Tender', 'Local'];
+    const modeN = modes.map((m) => base.filter((r) => r.mode === m).length);
+    const pipeN = BI_PIPES.map((_, i) => base.filter((r) => r.pipe >= i + 1).length);
+    const drop = pipeN.map((n, i) => i ? pipeN[i - 1] - n : 0);
+    $('#chFunnelNote').text(BI_PIPES.map((name, i) => `${name} ${pipeN[i]}` + (drop[i] ? ` (−${drop[i]})` : '')).join(' · '));
+    const districts = ['Hyderabad', 'Medchal', 'Nizamabad', 'Warangal', 'Karimnagar'];
+    const budgetLine = BI_MONTHS.map((m) => +base.filter((r) => r.month === m).reduce((a, r) => a + r.budget, 0).toFixed(1));
+    const cats = ['Life Support', 'Diagnostic', 'Imaging', 'Monitoring', 'Surgical'];
+    const catN = cats.map((c) => +base.filter((r) => r.category === c).reduce((a, r) => a + r.value, 0).toFixed(1));
+    const quarters = ['Q1', 'Q2', 'Q3', 'Q4'];
+    const slaQ = quarters.map((q) => { const set = base.filter((r) => r.quarter === q); return set.length ? Math.round(100 * set.filter((r) => r.sla === 'Met').length / set.length) : 0; });
+    const tatQ = quarters.map((q) => { const set = base.filter((r) => r.quarter === q); return set.length ? +(set.reduce((a, r) => a + r.tat, 0) / set.length).toFixed(1) : 0; });
+    const pick = (dim) => (evt, els, chart) => {
+      if (!els.length) return;
+      const hit = els[0];
+      const ds = chart.data.datasets[hit.datasetIndex];
+      if (ds && ds.label === 'Budget') return;
+      const label = dim === 'district' ? ds.label : chart.data.labels[hit.index];
+      biToggle(dim, label);
+    };
+    const legend = { position: 'bottom', labels: { boxWidth: 10, font: { size: 11, weight: '600' }, color: '#1c2e42' } };
+    const pieOpts = (dim, total, label) => ({
+      responsive: true, maintainAspectRatio: false, cutout: '62%',
+      plugins: { legend, centerText: { total, label } },
+      onClick: pick(dim)
+    });
+    if (window.Chart) {
+      biDraw('chStage', { type: 'doughnut', data: { labels: stages, datasets: [{ data: stageN, backgroundColor: BI_COLORS, borderWidth: 2, borderColor: '#fff', offset: stages.map((s) => biFilter && biFilter.dim === 'stage' && biFilter.value === s ? 14 : 0) }] }, options: pieOpts('stage', stageN.reduce((a, n) => a + n, 0), 'indents') });
+      biDraw('chMode', { type: 'doughnut', data: { labels: modes, datasets: [{ data: modeN, backgroundColor: ['#2361a9', '#c9820e', '#008b95'], borderWidth: 2, borderColor: '#fff', offset: modes.map((s) => biFilter && biFilter.dim === 'mode' && biFilter.value === s ? 14 : 0) }] }, options: pieOpts('mode', modeN.reduce((a, n) => a + n, 0), 'routes') });
+      biDraw('chFunnel', {
+        type: 'bar',
+        data: { labels: BI_PIPES, datasets: [{ label: 'Reached', data: pipeN, backgroundColor: BI_PIPES.map((name, i) => (biFilter && biFilter.dim === 'pipe' && biFilter.value === i + 1 ? '#123a6b' : BI_COLORS[i])), borderRadius: 6, barThickness: 18 }] },
+        options: {
+          indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => c.parsed.x + ' reached' + (drop[c.dataIndex] ? ' · drop-off ' + drop[c.dataIndex] : '') } } },
+          onClick: (evt, els) => { if (els.length) biToggle('pipe', els[0].index + 1); },
+          scales: { x: { grid: { color: '#e6edf3' }, ticks: { color: '#3d5166', font: { size: 11 } } }, y: { grid: { display: false }, ticks: { color: '#1c2e42', font: { size: 11, weight: '600' } } } }
+        }
+      });
+      const spendSets = districts.map((d, i) => ({
+        label: d,
+        data: BI_MONTHS.map((m) => +base.filter((r) => r.month === m && r.district === d).reduce((a, r) => a + r.actual, 0).toFixed(1)),
+        backgroundColor: BI_COLORS[i],
+        stack: 'actual'
+      }));
+      spendSets.push({ type: 'line', label: 'Budget', data: budgetLine, borderColor: '#123a6b', backgroundColor: '#123a6b', tension: 0.3, pointRadius: 3, yAxisID: 'y' });
+      biDraw('chSpend', {
+        type: 'bar',
+        data: { labels: BI_MONTHS, datasets: spendSets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 }, color: '#1c2e42' } } },
+          onClick: pick('district'),
+          scales: {
+            x: { stacked: true, grid: { display: false }, ticks: { color: '#3d5166', font: { size: 11 } } },
+            y: { stacked: true, grid: { color: '#e6edf3' }, ticks: { color: '#3d5166', font: { size: 11 } } }
+          }
+        }
+      });
+      biDraw('chCat', {
+        type: 'bar',
+        data: { labels: cats, datasets: [{ label: '₹ L', data: catN, backgroundColor: cats.map((c) => (biFilter && biFilter.dim === 'category' && biFilter.value === c ? '#123a6b' : '#2361a9')), borderRadius: 6 }] },
+        options: {
+          indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          onClick: pick('category'),
+          scales: {
+            x: { grid: { color: '#e6edf3' }, ticks: { color: '#3d5166' } },
+            y: { grid: { display: false }, ticks: { color: '#1c2e42', font: { size: 11, weight: '600' } } }
+          }
+        }
+      });
+      biDraw('chSla', {
+        type: 'line',
+        data: {
+          labels: quarters,
+          datasets: [
+            { label: 'SLA met %', data: slaQ, borderColor: '#2c9a62', backgroundColor: 'rgba(44,154,98,.15)', fill: true, tension: 0.35, pointRadius: 4, yAxisID: 'y' },
+            { label: 'Avg TAT (days)', data: tatQ, borderColor: '#c9820e', backgroundColor: '#c9820e', tension: 0.35, pointRadius: 4, yAxisID: 'y1' }
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 }, color: '#1c2e42' } } },
+          onClick: (evt, els, chart) => { if (els.length) biToggle('quarter', chart.data.labels[els[0].index]); },
+          scales: {
+            y: { min: 0, max: 100, grid: { color: '#e6edf3' }, ticks: { callback: (v) => v + '%', color: '#3d5166' } },
+            y1: { position: 'right', min: 0, grid: { drawOnChartArea: false }, ticks: { color: '#9a6607' } },
+            x: { grid: { display: false }, ticks: { color: '#1c2e42', font: { weight: '600' } } }
+          }
+        }
+      });
+    } else $('.bi-plot').html('<div class="muted">Charts need a network connection to load.</div>');
+    const chip = biFilter ? `<span class="bi-chip">${esc(biFilter.dim === 'pipe' ? BI_PIPES[biFilter.value - 1] : biFilter.value)} <button type="button" id="biClear" aria-label="Clear chart filter">✕</button></span>` : 'Click a slice or bar to filter';
+    $('#biGridTitle').text(`Drill-down · ${rows.length} rows`);
+    $('#biChip').html(chip);
+    $('#biRows').html(rows.map((r) => `<tr><td><b>${esc(r.id)}</b></td><td>${esc(r.facility)}</td><td>${esc(r.district)}</td><td>${esc(r.dept)}</td><td>${badge(r.stage)}</td><td>${esc(r.mode)}</td><td>${esc(r.category)}</td><td>${r.value}</td><td>${r.tat}d</td><td class="${r.sla === 'Met' ? 'ok-tx' : 'bad-tx'}">${esc(r.sla)}</td></tr>`).join('') || `<tr><td colspan="10">${emptyState('Nothing matches these filters.')}</td></tr>`);
   }
   function openReport(title) {
     const rows = mockReportRows(title);
@@ -1384,12 +1601,27 @@
     $(document).on('click', '[data-wiz-draft]', saveDraftWiz);
     $(document).on('click', '[data-wiz-submit]', submitWiz);
     // S3 equipment table: toolbar add / write-in / per-row master pick / delete
-    const fillRowFromMaster = (i, code) => { const m = (window.DEMS_MASTERS.EQUIPMENT_MASTER || []).find((x) => x.code === code); if (!m || !wiz.items[i]) return false; wiz.items[i] = { ...wiz.items[i], masterCode: code, equipment: m.name, dept: m.dept || wiz.items[i].dept || '', spec: wiz.items[i].spec || m.spec, writeIn: false, resolution: '', cost: wiz.items[i].cost || m.rate }; return true; };
+    const fillRowFromMaster = (i, code) => { const m = (window.DEMS_MASTERS.EQUIPMENT_MASTER || []).find((x) => x.code === code); if (!m || !wiz.items[i]) return false; const qty = +wiz.items[i].qty || 1; wiz.items[i] = { ...wiz.items[i], masterCode: code, equipment: m.name, dept: m.dept || wiz.items[i].dept || '', spec: wiz.items[i].spec || m.spec, writeIn: false, resolution: '', qty, unitCost: m.rate, cost: +(qty * m.rate).toFixed(2) }; return true; };
     $(document).on('change', '#wDeptF', () => { harvestWiz(); renderWizard(); });
     $(document).on('click', '[data-tradd]', () => { harvestWiz(); const code = $('#wMasterPick').val() || ''; wiz.items.push({ masterCode: '', equipment: '', dept: wiz.deptFilter || '', spec: '', qty: 1, cost: 0, writeIn: false, resolution: '', consignees: [] }); if (code && fillRowFromMaster(wiz.items.length - 1, code)) toast(wiz.items[wiz.items.length - 1].equipment + ' added from Equipment Master'); renderWizard(); });
     $(document).on('click', '[data-trwritein]', () => { harvestWiz(); wiz.items.push({ masterCode: '__WRITEIN__', equipment: '', dept: wiz.deptFilter || '', spec: '', qty: 1, cost: 0, writeIn: true, resolution: '', consignees: [] }); renderWizard(); toast('Write-in row added — type name + spec (flagged Unverified – Pending Master Mapping)'); });
     $(document).on('click', '[data-tedel]', (e) => { harvestWiz(); wiz.items.splice(+$(e.currentTarget).data('tedel'), 1); renderWizard(); });
     $(document).on('change', '[data-trsel]', (e) => { harvestWiz(); const i = +$(e.currentTarget).data('trsel'); if (fillRowFromMaster(i, $(e.currentTarget).val())) { renderWizard(); toast(wiz.items[i].equipment + ' pulled from Equipment Master'); } });
+    $(document).on('input', '[data-trqty],[data-trcost]', () => {
+      let sum = 0;
+      wiz.items.forEach((it, i) => {
+        const qtyEl = $(`[data-trqty="${i}"]`);
+        if (!qtyEl.length) return;
+        const qty = +qtyEl.val() || 0;
+        const unit = +$(`[data-trcost="${i}"]`).val() || 0;
+        const line = qty * unit;
+        it.qty = qty; it.unitCost = unit; it.cost = +line.toFixed(2);
+        $(`[data-trtotal="${i}"]`).text(line.toFixed(2));
+        sum += line;
+      });
+      $('#wizEstTotal').text('₹' + sum.toFixed(2) + ' L');
+      $('#wizEstFoot').text(sum.toFixed(2));
+    });
     // S2 multi-select dropdown: in-place toggles (panel stays open), chips, search
     $(document).on('click', '[data-msel-toggle]', (e) => { e.stopPropagation(); $('#instMselPanel').toggle(); });
     $(document).on('click', '#instMselPanel', (e) => e.stopPropagation());
@@ -1883,15 +2115,21 @@
       mRecs(masterSel).unshift(rec); audit('Master Data', `Excel bulk upload (${n})`, masterSel); DB.save(); renderMasters(); toast(`"${n}" parsed — rows → Pending Approval`); });
 
     // Reports (11): drill-down + per-report CSV + filters
-    $('#reportApply').on('click', () => { renderReports(); toast('Filters applied — 15 reports + 12 KPIs refreshed'); });
-    $('#repFY,#repVendor,#repStatus').on('change', renderReports);
+    $('#reportApply').on('click', () => { renderReports(); toast('Filters applied — charts and drill-down refreshed'); });
+    $('#repFY,#repDistrict,#repDept,#repVendor,#repStatus').on('change', renderReports);
+    $('#repCatalog').on('change', function () { const t = $(this).val(); if (!t) return; openReport(t); this.value = ''; });
+    $(document).on('click', '#biClear', () => { biFilter = null; renderReports(); });
     $(document).on('click', '[data-report]', (e) => openReport($(e.currentTarget).data('report')));
     $(document).on('click', '[data-rep-csv]', (e) => { const t = $(e.currentTarget).data('rep-csv'); const rows = mockReportRows(t);
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([rows.map((r) => r.join(',')).join('\n')], { type: 'text/csv' })); a.download = t.replace(/\W+/g, '_') + '.csv'; a.click(); audit('Reports', 'Exported Excel', t); DB.save(); toast(`"${t}" exported`); });
     $('#btnCsv').on('click', () => {
-      const csv = 'Indent,Facility,ValueLakh,Status\n' + DB.data.indents.map((r) => `${r.id},"${r.facility}",${r.valueLakh},${r.status}`).join('\n');
-      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'dems-indents.csv'; a.click();
-      toast('Excel (CSV) exported'); audit('Reports', 'Exported Excel', 'Indent Status'); DB.save();
+      const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      const src = ($('#page-reports').hasClass('active') && window.__biRows) ? window.__biRows : null;
+      const csv = src
+        ? 'Reference,Facility,District,Department,Stage,Route,Category,ValueLakh,TAT,SLA\n' + src.map((r) => [r.id, r.facility, r.district, r.dept, r.stage, r.mode, r.category, r.value, r.tat, r.sla].map(q).join(',')).join('\n')
+        : 'Indent,Facility,ValueLakh,Status\n' + DB.data.indents.map((r) => `${q(r.id)},${q(r.facility)},${r.valueLakh},${q(r.status)}`).join('\n');
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = src ? 'dems-analytics.csv' : 'dems-indents.csv'; a.click();
+      toast('Excel (CSV) exported'); audit('Reports', 'Exported Excel', src ? 'Analytics drill-down' : 'Indent Status'); DB.save();
     });
     $('#btnPrint').on('click', () => window.print());
     $('#btnExportDash').on('click', () => window.print());
