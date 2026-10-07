@@ -77,7 +77,7 @@
   const ROLE_ACCESS = {
     'Administrator': ['dashboard', 'indents', 'newindent', 'approval', 'rc', 'po', 'delivery', 'qa', 'masters', 'reports', 'audit'],
     'TGMSIDC User': ['dashboard', 'indents', 'approval', 'rc', 'po', 'delivery', 'qa', 'masters', 'reports', 'audit'],
-    'GM Equipment': ['dashboard', 'approval', 'rc', 'reports', 'audit'],
+    'GM Equipment': ['dashboard', 'approval', 'rc', 'po', 'reports', 'audit'],
     'SO Equipment': ['dashboard', 'approval', 'rc', 'po', 'reports', 'audit'],
     'Executive Director': ['dashboard', 'po', 'reports', 'audit'],
     'DEO · HoD Facility': ['dashboard', 'indents', 'newindent', 'approval', 'reports'],
@@ -87,7 +87,7 @@
   const ROLE_ACTIONS = {
     'Administrator': ['*'],
     'TGMSIDC User': ['indent.verify', 'indent.track', 'rc.create', 'rc.edit', 'po.generate', 'po.dispatch', 'delivery.manage', 'delivery.receipt', 'qa.manage', 'qa.decide', 'master.edit', 'vendor.simulate'],
-    'GM Equipment': ['indent.propose', 'indent.track', 'rc.gm'],
+    'GM Equipment': ['indent.propose', 'indent.track', 'rc.gm', 'po.propose'],
     'SO Equipment': ['indent.approve', 'indent.track', 'rc.so', 'po.approve'],
     'Executive Director': ['indent.track', 'po.approve'],
     'DEO · HoD Facility': ['indent.create', 'indent.track'],
@@ -166,8 +166,10 @@
     } else if (role === 'GM Equipment') {
       const q = gmQueue();
       kpis = kpi('◷', 'amber', 'Approval queue', q.length, 'oldest-first') + kpi('▤', 'blue', 'Proposed', myInd.filter((r) => r.status === 'Proposed').length, 'with SO') + kpi('✓', 'green', 'Approved', myInd.filter((r) => /Approv/.test(r.status)).length, 'this FY') + kpi('↩', 'amber', 'Returned', myInd.filter((r) => /Return|Reject/.test(r.status)).length, 'needs rework');
-      tables = qCard('Approval queue — verify, qty, mode, decide', 'aging Green <7d · Amber 7–14d · Red >14d', ['Indent', 'HoD · Type', 'TGMSIDC', 'Aging', ''], q.map((x) => `<tr><td><b>${esc(x.id)}</b></td><td>${esc(x.hodFacility || '')}<small>${esc(x.type || '')}</small></td><td><small>${(x.editHistory || []).length} corrections</small></td><td>${gmAge(x)}</td><td><button class="rowbtn" data-gm-open="${esc(x.id)}">Open</button></td></tr>`).join(''));
-      acts = roleActs([['approval', 'Decide indents', q.length + ' waiting'], ['rc', 'RC approvals', 'step 23'], ['reports', 'Reports', '15 MIS + KPIs']]);
+      const poq = DB.data.pos.filter((p) => p.status === 'Pending PO Approval');
+      tables = qCard('Approval queue — verify, qty, mode, decide', 'aging Green <7d · Amber 7–14d · Red >14d', ['Indent', 'HoD · Type', 'TGMSIDC', 'Aging', ''], q.map((x) => `<tr><td><b>${esc(x.id)}</b></td><td>${esc(x.hodFacility || '')}<small>${esc(x.type || '')}</small></td><td><small>${(x.editHistory || []).length} corrections</small></td><td>${gmAge(x)}</td><td><button class="rowbtn" data-gm-open="${esc(x.id)}">Open</button></td></tr>`).join(''))
+        + qCard('PO approval queue — Sheet 6', 'aging Green <3d · Amber 3–5d · Red >5d', ['PO', 'Vendor', 'Value', 'Aging', ''], poq.map((p) => `<tr><td><b>${esc(p.no)}</b></td><td>${esc((p.lines[0] || {}).vendor || '')}</td><td>₹${(poCalc(p).total / 100000).toFixed(2)} L</td><td>${poAgeBadge(p)}</td><td><button class="rowbtn" data-dash-po="${esc(p.no)}">Review</button></td></tr>`).join(''));
+      acts = roleActs([['approval', 'Decide indents', q.length + ' waiting'], ['po', 'Approve POs', poq.length + ' new'], ['rc', 'RC approvals', 'step 23'], ['reports', 'Reports', '15 MIS + KPIs']]);
     } else if (role === 'SO Equipment') {
       const prop = myInd.filter((r) => r.status === 'Proposed');
       const rcw = DB.data.rcs.filter((r) => r.submitStatus === 'Pending RC Approval' && r.gmDecision === 'Proposed to Approve' && !r.soDecision);
@@ -999,45 +1001,201 @@
   }
   /* ============ 7. PO generation (5) + approval (6) + amend/cancel (7) ===== */
   let poSel = 'PO/2026/00452';
-  function poCalc(p) { const sub = (p.lines || []).reduce((a, l) => a + l.qty * l.rate, 0); const gst = sub * (p.gstPct || 0) / 100; return { sub, gst, total: sub + gst }; }
+  function poCalc(p) { const sub = (p.lines || []).reduce((a, l) => a + (+l.qty || 0) * (+l.rate || 0), 0); const gst = sub * (p.gstPct || 0) / 100; return { sub, gst, total: sub + gst }; }
+  function poAgeDays(p) { if (!p.submittedAt) return 0; const t = new Date(p.submittedAt); if (isNaN(t)) return 0; return Math.max(0, Math.floor((Date.now() - t) / 86400000)); }
+  function poAgeBadge(p) { const d = poAgeDays(p); const cls = d > 5 ? 'red' : d >= 3 ? 'yellow' : 'green'; return `<span class="badge ${cls}">${d}d · ${d > 5 ? 'Red' : d >= 3 ? 'Amber' : 'Green'}</span>`; }
+  function nextPONo() { const fy = String($('#fySel').val() || '2026-27').slice(0, 4); const n = DB.data.pos.reduce((a, x) => { const m = /(\d+)$/.exec(x.no || ''); return Math.max(a, m ? +m[1] : 0); }, 452); return `PO/${fy}/${String(n + 1).padStart(5, '0')}`; }
+  function ensurePOShape(p) {
+    p.fy = p.fy || ($('#fySel').val() || '2026-27');
+    p.poType = p.poType || 'RC-based';
+    p.lines = p.lines || []; p.consignees = p.consignees || [];
+    p.chain = Object.assign({ gm: 'Pending', so: 'Pending', ed: 'Not required' }, p.chain || {});
+    p.versions = p.versions || []; p.anomalies = p.anomalies || []; p.amendments = p.amendments || [];
+    p.ack = p.ack || 'Pending'; p.gstPct = p.gstPct || 12;
+    p.psRequired = p.psRequired != null ? !!p.psRequired : !/Exempt|not required/i.test(p.perfSecurity || '');
+    p.psPct = +p.psPct || parseFloat(p.perfSecurity) || 5;
+    p.fileNo = p.fileNo || ''; p.wing = p.wing || 'BME'; p.generatedBy = p.generatedBy || ''; p.remarks = p.remarks || '';
+    p.annex1 = p.annex1 || ''; p.annex2 = p.annex2 || ''; p.annex3 = p.annex3 || '';
+    p.rcOk = p.rcOk || ''; p.issueQty = +p.issueQty || p.lines.reduce((a, l) => a + (+l.qty || 0), 0);
+    if (!p.poDate && /Draft|Returned/.test(p.status)) p.poDate = todayISO();
+    return p;
+  }
+  function indentRemain(ind, exceptNo) {
+    return (ind.items || []).map((it) => {
+      const approved = +it.apprQty > 0 ? +it.apprQty : (+it.qty || 0);
+      const ordered = DB.data.pos.filter((po) => po.indent === ind.id && po.no !== exceptNo && po.equipment === it.equipment && !/Draft|Rejected|Cancelled|Returned/.test(po.status))
+        .reduce((a, po) => a + (po.lines || []).reduce((s, l) => s + (+l.qty || 0), 0), 0);
+      return { equipment: it.equipment, spec: it.spec || '', approved, ordered, remain: Math.max(0, approved - ordered), consignees: it.consignees || [] };
+    });
+  }
+  function poIndents(currentId) {
+    return DB.data.indents.filter((x) => x.id === currentId || (/Approved/i.test(x.status) && indentRemain(x, '').some((l) => l.remain > 0)));
+  }
+  function rcForEquip(name, currentNo) {
+    const rows = DB.data.rcs.filter((r) => r.equipment === name || r.no === currentNo);
+    return rows.find((r) => r.no === currentNo) || rows.find((r) => r.status === 'Active') || rows.find((r) => r.status === 'Expiring') || rows[0] || null;
+  }
+  function rcVendors(rc) {
+    if (rc && rc.pricing && rc.pricing.length) return rc.pricing.filter((x) => x.vendor).map((x) => ({ vendor: x.vendor, rank: x.rank || 'L1', rate: +x.rateEx || +x.rate || +rc.basicRate || 0 }));
+    if (rc && rc.vendor) return [{ vendor: rc.vendor, rank: 'L1', rate: +rc.basicRate || 0 }];
+    return [];
+  }
+  function poFullyDelivered(p) { const d = DB.data.deliveries.find((x) => x.po === p.no); return !!(d && d.received >= d.expected && /Complete|Closed/.test(d.status)); }
+  function poAmendable(p) { return /Approved|Pending Dispatch|Partially Received|Partially Delivered/.test(p.status) && !poFullyDelivered(p); }
+  function poReceived(p) { const d = DB.data.deliveries.find((x) => x.po === p.no); return d ? +d.received || 0 : 0; }
+  function harvestIssue(p) {
+    if (!$('#poType').length) return p;
+    p.poType = $('#poType').val() || p.poType;
+    p.indent = $('#poIndent').val() || '';
+    p.equipment = $('#poEquip').val() || p.equipment;
+    p.issueQty = +$('#poQty').val() || 0;
+    p.rcOk = $('#poRcOk').val() || '';
+    p.rcFix = $('#poRcFix').val() || '';
+    p.gstPct = +$('#poGst').val() || p.gstPct || 12;
+    p.psRequired = $('#poPs').val() === 'Yes';
+    p.psPct = +$('#poPsPct').val() || 0;
+    p.fileNo = $('#poFile').val() || '';
+    p.wing = $('#poWing').val() || 'BME';
+    p.generatedBy = $('#poBy').val() || '';
+    p.remarks = $('#poRemarks').val() || '';
+    p.tc = $('#poTc').val() || p.tc;
+    p.annex1 = $('#poAx1').val() || '';
+    p.annex2 = $('#poAx2').val() || '';
+    p.annex3 = $('#poAx3').val() || '';
+    p.lines = (p.lines || []).map((l, i) => ({ ...l, qty: +($(`[data-po-vqty="${i}"]`).val()) || 0, rate: +($(`[data-po-vrate="${i}"]`).val()) || +l.rate || 0, vendor: $(`[data-po-vv="${i}"]`).val() || l.vendor }));
+    const cons = [];
+    $('[data-po-cqty]').each((_, el) => { const i = $(el).attr('data-po-cqty'); cons.push({ institution: $(`[data-po-cinst="${i}"]`).val() || $(el).attr('data-inst') || '', qty: +$(el).val() || 0 }); });
+    if (cons.length) p.consignees = cons;
+    return p;
+  }
+  function poBudget(p) {
+    const ind = DB.data.indents.find((x) => x.id === p.indent);
+    const deposited = ind ? (ind.funds || []).reduce((a, f) => a + (+f.deposited || 0), 0) : 0;
+    const committed = DB.data.pos.filter((x) => x.indent === p.indent && x.no !== p.no && !/Draft|Rejected|Cancelled|Returned/.test(x.status)).reduce((a, x) => a + poCalc(x).total / 100000, 0);
+    return { deposited, committed, left: +(deposited - committed).toFixed(2), need: +(poCalc(p).total / 100000).toFixed(2) };
+  }
   async function renderPOs() {
+    DB.data.pos.forEach(ensurePOShape);
     $('#poRows').html(skeleton(3, 7));
     let rows = await MockAPI.getPOs();
+    rows.forEach(ensurePOShape);
     const q = ($('#poQ').val() || '').toLowerCase(), st = $('#poStatus').val();
-    if (q) rows = rows.filter((p) => (p.no + p.indent + p.rc + p.lines.map((l) => l.vendor).join(' ')).toLowerCase().includes(q));
-    if (st && st !== 'All') rows = rows.filter((p) => p.status === st);
-    $('#poRows').html(rows.map((p) => { const c = poCalc(p); const anom = (p.anomalies || []).length ? ` <span class="badge red">${p.anomalies.length} anomaly</span>` : '';
-      return `<tr><td><b>${esc(p.no)}</b><small>v${(p.versions || []).length} · ${esc(p.equipment || '')}</small></td><td>${esc(p.indent)}<small>${esc(p.rc)} · ${esc((DB.data.indents.find((x) => x.id === p.indent)?.items[0]?.mode) || 'RC')}</small></td>
-      <td>${p.lines.map((l) => `${esc(l.vendor.split(' ')[0])} <b>${l.rank}</b> ×${l.qty}`).join('<br>')}</td>
-      <td>₹${(c.total / 100000).toFixed(2)} L<small>incl ${p.gstPct}% GST</small>${anom}</td>
-      <td><small>GM:${esc(p.chain.gm)} → SO:${esc(p.chain.so)} → ED:${esc(p.chain.ed)}</small><br>${badge(p.approval)}</td>
+    if (q) rows = rows.filter((p) => (p.no + p.indent + (p.rc || '') + p.lines.map((l) => l.vendor).join(' ')).toLowerCase().includes(q));
+    if (st === 'New') rows = rows.filter((p) => p.status === 'Pending PO Approval').sort((a, b) => poAgeDays(b) - poAgeDays(a));
+    else if (st && st !== 'All') rows = rows.filter((p) => p.status === st);
+    $('#poRows').html(rows.map((p) => { const c = poCalc(p);
+      return `<tr><td><b>${esc(p.no)}</b><small>v${(p.versions || []).length} · ${esc(p.equipment || '')}</small></td><td>${esc(p.indent || '—')}<small>${esc(p.rc || p.poType || '')}</small></td>
+      <td>${(p.lines || []).map((l) => `${esc(String(l.vendor || '').split(' ')[0])} <b>${esc(l.rank || '')}</b> ×${l.qty}`).join('<br>') || '—'}</td>
+      <td>₹${(c.total / 100000).toFixed(2)} L<small>incl ${p.gstPct}% GST</small></td>
+      <td><small>GM:${esc(p.chain.gm)} → SO:${esc(p.chain.so)} → ED:${esc(p.chain.ed)}</small><br>${badge(p.approval)}${p.status === 'Pending PO Approval' ? ' ' + poAgeBadge(p) : ''}</td>
       <td>${badge(p.status)}<br><small>Ack: ${esc(p.ack)}</small></td>
       <td><button class="rowbtn" data-po-view="${esc(p.no)}">Open</button></td></tr>`; }).join('') || `<tr><td colspan="7">${emptyState('No purchase orders match.')}</td></tr>`);
     renderPODetail(); renderVendorPortal();
   }
   function renderPODetail() {
-    const p = DB.data.pos.find((x) => x.no === poSel) || DB.data.pos[0]; if (!p) return; poSel = p.no;
+    const raw = DB.data.pos.find((x) => x.no === poSel) || DB.data.pos[0];
+    if (!raw) { $('#poDetail').html(emptyState('No purchase orders.')); return; }
+    const p = ensurePOShape(raw); poSel = p.no;
+    const edit = canDo('po.generate') && /Draft|Returned for Modification/.test(p.status);
+    const ind = DB.data.indents.find((x) => x.id === p.indent);
+    const remainRows = ind ? indentRemain(ind, p.no) : [];
+    const equipRow = remainRows.find((x) => x.equipment === p.equipment) || remainRows[0];
+    const rc = p.poType === 'Local Purchase' ? null : rcForEquip(p.equipment, p.rc);
+    const expired = !!(rc && (rc.status === 'Expired' || +rc.daysLeft < 0));
+    const soon = !!(rc && +rc.daysLeft >= 0 && +rc.daysLeft < 30);
     const c = poCalc(p);
-    $('#poDetail').html(`<h3>${esc(p.no)} · v${(p.versions || []).length} · ${badge(p.status)} ${badge(p.approval)}</h3>
-      <div class="grid two" style="margin-top:0"><div>
-      <h3 class="subhead">Generation — linked indent + active RC · split · GST · T&amp;C</h3>
-      <div class="review-box">Indent <b>${esc(p.indent)}</b> + <b>${esc(p.rc)}</b> (${esc(p.equipment)})<br>
-      Split: ${p.lines.map((l) => `${l.rank}: ${esc(l.vendor)} × ${l.qty} @ ₹${Number(l.rate).toLocaleString()}`).join(' · ')}<br>
-      Subtotal ₹${c.sub.toLocaleString()} + GST ${p.gstPct}% (₹${Math.round(c.gst).toLocaleString()}) = <b>₹${c.total.toLocaleString()} (₹${(c.total / 100000).toFixed(2)} L)</b><br>
-      Performance security: ${esc(p.perfSecurity)} · T&amp;C: ${esc(p.tc)}<br>Consignees: ${p.consignees.map((x) => `${esc(x.institution)} (${x.qty})`).join(' + ')}<br>
-      ${(p.anomalies || []).length ? `Anomalies: ${p.anomalies.map(esc).join('; ')}` : 'Anomaly check: clean'}</div>
-      <h3 class="subhead">Versions (${(p.versions || []).length}) — amend needs re-approval</h3>${(p.versions || []).map((x) => `<div class="activity"><span class="check">v${x.v}</span><div><b>${esc(x.note)}</b><small>${esc(x.approval)}</small></div></div>`).join('')}
-      </div><div>
-      <h3 class="subhead">Approval GM → SO → ED (₹25 L threshold)</h3>
-      <div class="form-grid" style="grid-template-columns:repeat(3,1fr)"><label>GM<select id="poGM"><option>Proposed</option><option>Returned</option></select></label><label>SO<select id="poSO"><option>Approved</option><option>Returned</option><option>Pending</option></select></label><label>ED<select id="poED"><option>Approved</option><option>Pending</option><option>Not required</option></select></label></div>
+    const bud = poBudget(p);
+    const psAmt = p.psRequired ? Math.round(c.total * (+p.psPct || 0) / 100) : 0;
+    const dis = edit ? '' : 'disabled';
+    const indOpts = poIndents(p.indent).map((x) => `<option value="${esc(x.id)}" ${p.indent === x.id ? 'selected' : ''}>${esc(x.id)} · ${esc(x.facility)} · ${esc(x.status)}</option>`).join('');
+    const eqOpts = (remainRows.length ? remainRows : (ind ? (ind.items || []).map((it) => ({ equipment: it.equipment, remain: it.qty, approved: it.qty })) : [])).map((it) => `<option value="${esc(it.equipment)}" ${p.equipment === it.equipment ? 'selected' : ''}>${esc(it.equipment)} · remaining ${it.remain}</option>`).join('');
+    const vendors = (p.lines && p.lines.length) ? p.lines : (p.poType === 'Local Purchase' ? [{ vendor: '', rank: 'L1', qty: p.issueQty || 0, rate: 0 }] : rcVendors(rc).map((v) => ({ ...v, qty: v.rank === 'L1' ? (p.issueQty || 0) : 0 })));
+    if (edit && (!p.lines || !p.lines.length) && vendors.length) p.lines = vendors.map((v) => ({ ...v }));
+    const consSrc = (p.consignees && p.consignees.length) ? p.consignees : ((equipRow && equipRow.consignees) || []).map((x) => ({ institution: x.institution, qty: x.qty }));
+    const issueForm = `<div class="phase-sec">1–3 · Draft no., financial year, PO type</div>
+      <div class="form-grid"><label>PO number<input value="${esc(p.no)}" readonly style="background:#f4f7fa"></label>
+      <label>Financial year (current, active)<input value="${esc(p.fy)}" readonly style="background:#f4f7fa"></label>
+      <label>PO type<select id="poType" ${dis}><option ${p.poType === 'RC-based' ? 'selected' : ''}>RC-based</option><option ${p.poType === 'Local Purchase' ? 'selected' : ''}>Local Purchase</option></select></label></div>
+      <div class="phase-sec">4–6 · Approved indent, equipment qty, PO date</div>
+      <div class="form-grid"><label>Approved indent (remaining qty &gt; 0)<select id="poIndent" ${dis}><option value="">— Select —</option>${indOpts}</select></label>
+      <label>Equipment line<select id="poEquip" ${dis}><option value="">— Select —</option>${eqOpts}</select></label>
+      <label>Qty to issue (≤ ${equipRow ? equipRow.remain : '—'})<input id="poQty" type="number" min="1" max="${equipRow ? equipRow.remain : ''}" value="${p.issueQty || (equipRow ? equipRow.remain : 0)}" ${dis}></label>
+      <label>PO date (today, locked)<input type="date" value="${esc(p.poDate || todayISO())}" readonly style="background:#f4f7fa"></label></div>
+      ${p.poType === 'Local Purchase' ? '<div class="review-box">Local Purchase — RC steps 7–9 do not apply. Enter the vendor and rate below.</div>' : `<div class="phase-sec">7–9 · RC check ${expired ? '<span class="badge red">Expired — PO blocked</span>' : soon ? '<span class="badge yellow">&lt;30 days left</span>' : rc ? '<span class="badge green">Active RC</span>' : '<span class="badge yellow">No active RC</span>'}</div>
+      <div class="review-box">${rc ? `RC <b>${esc(rc.no)}</b> · ${esc(rc.vendor || (rcVendors(rc)[0] || {}).vendor || '—')} · valid till ${esc(rc.validTill || '—')} · ${rc.daysLeft}d · supply ${esc((rc.header || {}).supplyDays || '—')} days<br>Rates: ${rcVendors(rc).map((v) => `${esc(v.rank)} ${esc(v.vendor)} @ ₹${Number(v.rate).toLocaleString()}`).join(' · ') || '—'}` : 'No active rate contract for this equipment. Renew or correct the RC before issuing.'}</div>
+      <div class="form-grid"><label>RC details correct?<select id="poRcOk" ${dis}><option value="">— Decide —</option><option ${p.rcOk === 'Yes' ? 'selected' : ''}>Yes</option><option ${p.rcOk === 'No' ? 'selected' : ''}>No</option></select></label>
+      <label style="grid-column:span 2">If incorrect — correction note (supervisor must authorize)<input id="poRcFix" value="${esc(p.rcFix || '')}" ${dis}></label></div>
+      ${p.rcOk === 'No' ? `<div class="form-actions" style="justify-content:flex-start"><button type="button" class="secondary" data-po-rc-auth ${canDo('po.propose') ? '' : 'disabled'}>GM: authorize RC correction</button>${p.rcAuthorized ? ' <span class="badge green">Authorized — set the decision back to Yes</span>' : ''}</div>` : ''}`}
+      <div class="phase-sec">10–11 · Vendor split and consignees (sums must match)</div>
+      ${(p.lines || []).map((l, i) => `<div class="form-grid"><label>${esc(l.rank || 'L1')} vendor<input data-po-vv="${i}" value="${esc(l.vendor || '')}" ${dis}></label><label>Qty<input type="number" data-po-vqty="${i}" value="${l.qty || 0}" ${dis}></label><label>Rate excl. tax ₹<input type="number" data-po-vrate="${i}" value="${l.rate || 0}" ${dis}></label></div>`).join('') || '<div class="muted">Select an indent line to load L1/L2/L3.</div>'}
+      ${(consSrc.length ? consSrc : [{ institution: '', qty: 0 }]).map((cn, i) => `<div class="form-grid two-col"><label>Consignee ${i + 1}<input data-po-cinst="${i}" data-inst="${esc(cn.institution)}" value="${esc(cn.institution)}" ${dis}></label><label>Qty<input type="number" data-po-cqty="${i}" data-inst="${esc(cn.institution)}" value="${cn.qty || 0}" ${dis}></label></div>`).join('')}
+      <div class="phase-sec">12–15 · Cost, performance security, T&amp;C</div>
+      <div class="review-box">A Rate/unit excl. tax ₹${(p.lines[0] ? Number(p.lines[0].rate).toLocaleString() : '0')} · B GST ₹${Math.round(c.gst / Math.max(1, p.issueQty || 1)).toLocaleString()} /unit · C Incl. tax · D Qty ${p.issueQty || 0}<br>
+      E Equipment cost (excl.) ₹${Math.round(c.sub).toLocaleString()} · F Net PO cost ₹${Math.round(c.total).toLocaleString()} (₹${(c.total / 100000).toFixed(2)} L)<br>
+      Budget: deposited ₹${bud.deposited} L − commitments ₹${bud.committed} L = <b class="${bud.need > bud.left ? 'bad-tx' : 'ok-tx'}">${bud.need > bud.left ? 'short' : 'within'} ₹${bud.left} L</b> · this PO ₹${bud.need} L<br>
+      PS ${p.psRequired ? p.psPct + '% = ₹' + psAmt.toLocaleString() : 'not required'}</div>
+      <div class="form-grid"><label>GST %<select id="poGst" ${dis}>${[5, 12, 18, 28].map((g) => `<option ${+p.gstPct === g ? 'selected' : ''}>${g}</option>`).join('')}</select></label>
+      <label>File no. / Wing<input id="poFile" value="${esc(p.fileNo)}" placeholder="File no." ${dis}></label>
+      <label>Wing / BME<input id="poWing" value="${esc(p.wing)}" ${dis}></label>
+      <label>Generated by<input id="poBy" value="${esc(p.generatedBy)}" ${dis}></label>
+      <label style="grid-column:span 2">Remarks<input id="poRemarks" value="${esc(p.remarks)}" ${dis}></label>
+      <label>Performance security?<select id="poPs" ${dis}><option ${p.psRequired ? 'selected' : ''}>Yes</option><option ${!p.psRequired ? 'selected' : ''}>No</option></select></label>
+      <label>PS % (3–10)<input id="poPsPct" type="number" min="3" max="10" value="${p.psPct || 5}" ${dis}></label>
+      <label>T&amp;C template<select id="poTc" ${dis}>${window.DEMS_MASTERS.LOOKUPS.tcTemplates.map((t) => `<option ${p.tc === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
+      <label>Annexure I · specs<textarea id="poAx1" rows="2" style="width:100%;border:1px solid #d8e0ea;border-radius:7px;padding:6px" ${dis}>${esc(p.annex1 || (equipRow && equipRow.spec) || '')}</textarea></label>
+      <label>Annexure II · consignees<textarea id="poAx2" rows="2" style="width:100%;border:1px solid #d8e0ea;border-radius:7px;padding:6px" ${dis}>${esc(p.annex2)}</textarea></label>
+      <label>Annexure III · delivery schedule<textarea id="poAx3" rows="2" style="width:100%;border:1px solid #d8e0ea;border-radius:7px;padding:6px" ${dis}>${esc(p.annex3)}</textarea></label></div>
+      <div class="muted">Boilerplate T&amp;C stays locked. Only the variable clauses above are edited, and each save is a version.</div>
+      ${edit ? `<div class="form-actions" style="justify-content:flex-start"><button class="secondary" data-po-save>Save draft</button><button class="primary" data-po-submit>Submit for PO approval →</button></div>` : ''}`;
+    const summary = `<div class="review-box">FY ${esc(p.fy)} · ${esc(p.poType)} · date ${esc(p.poDate || '—')} · indent <b>${esc(p.indent || '—')}</b> · ${esc(p.equipment || '—')} × ${p.issueQty || c.sub && p.lines.reduce((a, l) => a + (+l.qty || 0), 0)}<br>
+      RC ${esc(p.rc || '—')} ${p.rcOk === 'Yes' ? '· checked' : ''}<br>
+      ${p.lines.map((l) => `${esc(l.rank)} ${esc(l.vendor)} × ${l.qty} @ ₹${Number(l.rate).toLocaleString()}`).join(' · ') || '—'}<br>
+      Consignees: ${p.consignees.map((x) => `${esc(x.institution)} (${x.qty})`).join(' · ') || '—'}<br>
+      Net ₹${Math.round(c.total).toLocaleString()} · PS ${esc(p.perfSecurity || (p.psRequired ? p.psPct + '%' : 'not required'))} · T&amp;C ${esc(p.tc || '—')}<br>
+      File ${esc(p.fileNo || '—')} · ${esc(p.wing)} · ${esc(p.generatedBy || '—')}</div>`;
+    const compare = `<div class="po-compare">
+      <div class="review-box"><b>PO</b><br>${esc(p.no)}<br>${esc(p.equipment)} × ${p.lines.reduce((a, l) => a + (+l.qty || 0), 0)}<br>₹${(c.total / 100000).toFixed(2)} L incl. GST<br>PS ${p.psRequired ? p.psPct + '%' : 'no'}</div>
+      <div class="review-box"><b>Indent</b><br>${esc(p.indent || '—')}<br>${ind ? esc(ind.status) : 'not on file'}<br>${equipRow ? `approved ${equipRow.approved} · left ${equipRow.remain}` : ''}<br>${esc((ind && ind.gmRemarks) || 'no GM note')}</div>
+      <div class="review-box"><b>RC</b><br>${rc ? esc(rc.no) + ' · ' + esc(rc.status) : esc(p.rc || '—')}<br>${rc ? rc.daysLeft + 'd · ₹' + Number(rc.basicRate || 0).toLocaleString() : ''}<br>${expired ? '<span class="badge red">Expired</span>' : soon ? '<span class="badge yellow">&lt;30d</span>' : ''}</div></div>`;
+    const anomalies = [];
+    if (p.poType !== 'Local Purchase' && expired) anomalies.push('RC expired — blocked');
+    if (soon) anomalies.push('RC validity under 30 days');
+    if (bud.need > bud.left && bud.deposited > 0) anomalies.push('PO cost exceeds available funds');
+    if (rc && p.lines[0] && +p.lines[0].rate && +rc.basicRate && +p.lines[0].rate !== +rc.basicRate) anomalies.push('L1 rate differs from RC basic rate');
+    if (!(p.consignees || []).length) anomalies.push('Consignee mapping missing');
+    const gmOk = canDo('po.propose'), soOk = canDo('po.approve'), edOk = canDo('po.approve') && curRole() === 'Executive Director' || (canDo('po.approve') && curRole() === 'Administrator');
+    const high = c.total / 100000 > 25;
+    const approval = p.status === 'Pending PO Approval' ? `<div class="phase-sec">1–3 · Queue, detail, verification ${poAgeBadge(p)}</div>${compare}
+      <div class="review-box">${anomalies.length ? anomalies.map((a) => `<div class="bad-tx">⚠ ${esc(a)}</div>`).join('') : '<div class="ok-tx">✓ No rate, budget, or consignee anomalies</div>'}</div>
+      <div class="phase-sec">4 · GM proposal</div>
+      <div class="form-actions" style="justify-content:flex-start">${p.chain.gm === 'Pending' ? `<button class="primary" data-po-gm="approve" ${gmOk ? '' : 'disabled'}>Propose to Approve</button><button class="secondary" data-po-gm="return" ${gmOk ? '' : 'disabled'}>Propose Return</button><button class="danger" data-po-gm="reject" ${gmOk ? '' : 'disabled'}>Propose Reject</button>` : `<span class="badge blue">GM: ${esc(p.chain.gm)}</span>`}</div>
+      ${p.chain.gm !== 'Pending' ? `<div class="phase-sec">5–8 · SO decision${high ? ' · ED required above ₹25 L' : ''}</div>
+      <div class="form-actions" style="justify-content:flex-start">${p.chain.so === 'Pending' ? `<button class="primary" data-po-so="approve" ${soOk && curRole() !== 'Executive Director' ? '' : 'disabled'}>SO: Approve</button><button class="secondary" data-po-so="return" ${soOk && curRole() !== 'Executive Director' ? '' : 'disabled'}>SO: Return</button><button class="danger" data-po-so="reject" ${soOk && curRole() !== 'Executive Director' ? '' : 'disabled'}>SO: Reject</button>` : `<span class="badge blue">SO: ${esc(p.chain.so)}</span>`}
+      ${high && p.chain.so === 'Approved' && p.chain.ed === 'Pending' ? `<button class="primary" data-po-ed="approve" ${edOk ? '' : 'disabled'}>ED: Approve</button>` : ''}</div>` : ''}`
+      : /Approved|Pending Dispatch|Clarification|Partially/.test(p.status) ? `${compare}<div class="review-box">Approved ${esc(p.approval)} · PDF on file · supply clock started from RC period.<br>Vendor ack: <b>${esc(p.ack)}</b>${p.ack === 'Pending' ? ` · due in 7 days ${poAgeDays(p) > 7 ? '<span class="badge red">escalation — no acknowledgement</span>' : ''}` : ''}${p.dispatchExpect ? ' · expected dispatch ' + esc(p.dispatchExpect) : ''}</div>
       <div class="form-actions" style="justify-content:flex-start;flex-wrap:wrap">
-        <button class="primary" data-po-approve ${canDo('po.approve') ? '' : 'disabled title="Requires GM / SO / ED role"'}>Approve chain + PDF</button>
-        <button class="secondary" data-po-amend ${canDo('po.generate') ? '' : 'disabled title="Requires TGMSIDC User role"'}>✎ Amend (new version)</button>
-        <button class="danger" data-po-cancel ${canDo('po.generate') ? '' : 'disabled title="Requires TGMSIDC User role"'}>Cancel PO (free indent qty)</button>
-        <button class="secondary" data-po-dispatch ${canDo('po.dispatch') ? '' : 'disabled title="Requires TGMSIDC User role"'}>Dispatch → Vendor Portal</button>
-      </div>
-      <h3 class="subhead">Vendor acknowledgement (Portal)</h3><div>Ack: <b>${esc(p.ack)}</b> ${p.ack === 'Pending' ? `<button class="rowbtn" data-po-ack-ven ${(canDo('vendor.ack') || canDo('vendor.simulate')) ? '' : 'disabled title="Requires Vendor role"'}>Simulate vendor ACK</button>` : ''}</div>
-      </div></div>`);
+        ${p.ack === 'Pending' ? `<button class="secondary" data-po-ack-ven ${(canDo('vendor.ack') || canDo('vendor.simulate')) ? '' : 'disabled'}>Vendor: Acknowledge</button><label class="muted">Expected dispatch<input id="poDispatchDt" type="date" style="min-height:36px;border:1px solid #d8e0ea;border-radius:7px;padding:0 8px"></label><button class="secondary" data-po-clarify ${(canDo('vendor.ack') || canDo('vendor.simulate')) ? '' : 'disabled'}>Raise clarification</button>` : ''}
+        ${/Approved/.test(p.status) ? `<button class="secondary" data-po-dispatch ${canDo('po.dispatch') ? '' : 'disabled'}>Send to Vendor Portal</button>` : ''}
+      </div>` : '<div class="muted">Approval opens after Submit. Returned and rejected POs come back to Issue PO or close.</div>';
+    const amd = p.amendment;
+    const amendBlock = !poAmendable(p) && !(amd && /Pending/.test(amd.status)) && !(p.cancelReq && /Pending/.test(p.cancelReq.status))
+      ? `<div class="muted">${poFullyDelivered(p) ? 'Fully delivered — amendments and cancellation are blocked.' : 'Amend or cancel after the PO is Approved and not fully delivered. Allowed: quantity, consignee, delivery date, or full cancellation.'}</div>`
+      : `${amd && /Pending/.test(amd.status) ? `<div class="review-box"><b>${esc(amd.ref)}</b> · ${esc(amd.type)} · ${esc(amd.detail)}<br>${esc(amd.reason)} ${amd.doc ? '· 📄 ' + esc(amd.doc) : ''}<br>Status <b>${esc(amd.status)}</b></div>
+      <div class="form-actions" style="justify-content:flex-start">${amd.status === 'Amendment Pending Approval' ? `<button class="primary" data-po-amd="approve" ${soOk && curRole() !== 'Executive Director' ? '' : 'disabled'}>SO: Approve amendment</button><button class="danger" data-po-amd="reject" ${soOk && curRole() !== 'Executive Director' ? '' : 'disabled'}>SO: Reject</button>` : ''}${amd.status === 'Pending ED' ? `<button class="primary" data-po-amd="ed" ${edOk ? '' : 'disabled'}>ED: Approve financial amendment</button>` : ''}</div>` : (poAmendable(p) ? `<div class="form-grid"><label>Amendment type<select id="amdType"><option>Quantity change</option><option>Consignee change</option><option>Delivery date extension</option><option>Rate revision</option></select></label>
+      <label>Revised detail<input id="amdDetail" placeholder="new qty, institution, date, or rate"></label>
+      <label style="grid-column:1/-1">Justification *<input id="amdReason" placeholder="why this change is required"></label>
+      <label>Supporting document<input type="file" id="amdFile" accept=".pdf,.jpg,.jpeg,.png"></label></div>
+      <div class="form-actions" style="justify-content:flex-start"><button class="primary" data-po-amd-new ${canDo('po.generate') ? '' : 'disabled'}>Submit amendment for approval</button></div>` : '')}
+      ${p.cancelReq && /Pending/.test(p.cancelReq.status) ? `<div class="review-box">Cancellation <b>${esc(p.cancelReq.status)}</b> · ${esc(p.cancelReq.reason)} ${p.cancelReq.doc ? '· 📄 ' + esc(p.cancelReq.doc) : ''}<br>Qty to free: <b>${Math.max(0, p.lines.reduce((a, l) => a + (+l.qty || 0), 0) - poReceived(p))}</b> (received ${poReceived(p)} stays)</div>
+      <div class="form-actions" style="justify-content:flex-start">${p.cancelReq.status === 'Pending' ? `<button class="danger" data-po-cancel-go ${soOk && curRole() !== 'Executive Director' ? '' : 'disabled'}>SO: Approve cancellation</button>` : ''}${p.cancelReq.status === 'Pending ED' ? `<button class="danger" data-po-cancel-ed ${edOk ? '' : 'disabled'}>ED: Approve cancellation</button>` : ''}</div>` : (poAmendable(p) ? `<div class="phase-sec">5 · Full or remaining-qty cancellation</div>
+      <div class="form-grid"><label style="grid-column:1/-1">Cancellation reason *<input id="cxReason" placeholder="mandatory"></label><label>Supporting document<input type="file" id="cxFile" accept=".pdf,.jpg,.jpeg,.png"></label></div>
+      <div class="form-actions" style="justify-content:flex-start"><button class="danger" data-po-cancel ${canDo('po.generate') ? '' : 'disabled'}>Submit cancellation for approval</button></div>` : '')}
+      ${(p.amendments || []).map((x) => `<div class="activity"><span class="check">${esc(x.ref || 'v')}</span><div><b>${esc(x.type)} · ${esc(x.status)}</b><small>${esc(x.detail || '')}</small></div></div>`).join('')}`;
+    $('#poDetail').html(`<div class="phase-head"><h3>${esc(p.no)} · ${esc(p.equipment || 'New PO')}</h3><div class="rc-tools">${badge(p.status)} ${badge(p.approval || 'Draft')} ${p.status === 'Pending PO Approval' ? poAgeBadge(p) : ''}</div></div>
+      <div class="phase-card"><div class="phase-head"><h3>5 · Issue PO</h3><span class="badge blue">Steps 1–16</span></div>${edit ? issueForm : summary}
+      ${(p.versions || []).map((x) => `<div class="activity"><span class="check">v${x.v}</span><div><b>${esc(x.note)}</b><small>${esc(x.approval)}</small></div></div>`).join('')}</div>
+      <div class="phase-card"><div class="phase-head"><h3>6 · PO Approval</h3><span class="badge blue">GM → SO → ED · vendor ack</span></div>${approval}</div>
+      <div class="phase-card"><div class="phase-head"><h3>7 · Amendment &amp; Cancel</h3><span class="badge blue">Active / partial only</span></div>${amendBlock}</div>`);
   }
   function renderVendorPortal() {
     const myPOs = DB.data.pos.filter((p) => /Pending|Approved/i.test(p.status));
@@ -1559,33 +1717,118 @@
       audit('Rate Contract', `Renewed ${r.no} → ${n}`, n); DB.save(); rcSel = n; renderRCs(); toast(`${n} renewal drafted — predecessor ${r.no} linked`); });
     $(document).on('click', '[data-rc-close]', () => { if (!need('rc.edit', 'TGMSIDC User role')) return; const r = rcCur(); r.status = 'Closed'; audit('Rate Contract', 'Closed', r.no); DB.save(); renderRCs(); toast(`${r.no} closed`); });
 
-    // PO lifecycle (5+6+7) + vendor ack
+    // Sheets 5–7: Issue PO, approval, amendment / cancel
+    const poCur = () => ensurePOShape(DB.data.pos.find((x) => x.no === poSel));
     $(document).on('click', '[data-po-view]', (e) => { poSel = $(e.currentTarget).data('po-view'); renderPODetail(); $('#poDetail')[0].scrollIntoView({ behavior: 'smooth' }); });
     $('#poFilterBtn').on('click', renderPOs);
-    $('#btnNewPO').on('click', () => { if (!need('po.generate', 'TGMSIDC User role')) return; const actRC = DB.data.rcs.find((x) => x.status === 'Active'); const apInd = DB.data.indents.find((x) => /Approved/i.test(x.status)) || DB.data.indents[0];
-      const n = `PO/2026/00${453 + DB.data.pos.length}`; const eq = window.DEMS_MASTERS.EQUIPMENT_MASTER[0];
-      DB.data.pos.unshift({ no: n, indent: apInd.id, rc: actRC ? actRC.no : 'RC/2026/001', equipment: eq.name, lines: [{ vendor: actRC ? actRC.vendor : 'ABC Medical Systems', rank: 'L1', qty: 5, rate: actRC ? actRC.basicRate : 298000 }], valueLakh: 0, gstPct: 12, perfSecurity: '5% bank guarantee', tc: window.DEMS_MASTERS.LOOKUPS.tcTemplates[0], consignees: [{ institution: apInd.facility, qty: 5 }], approval: 'GM Proposed', chain: { gm: 'Proposed', so: 'Pending', ed: 'Pending' }, status: 'Draft', ack: 'Pending', versions: [{ v: 1, note: 'Generated from ' + apInd.id + ' + active RC', approval: 'GM Proposed' }], anomalies: [], indentQtyFreed: 0 });
-      const p = DB.data.pos[0]; p.valueLakh = +(poCalc(p).total / 100000).toFixed(2);
-      audit('Purchase Order', 'Generated (GM Proposed)', n); DB.save(); renderPOs(); toast(`${n} generated from ${apInd.id} — route GM→SO→ED`); });
-    $(document).on('click', '[data-po-approve]', () => { if (!need('po.approve', 'GM / SO / ED role')) return; const p = DB.data.pos.find((x) => x.no === poSel); p.chain = { gm: $('#poGM').val(), so: $('#poSO').val(), ed: $('#poED').val() };
-      p.anomalies = []; if (poCalc(p).total / 100000 > 25 && p.chain.ed !== 'Approved') p.anomalies.push('Above ₹25L — ED approval required');
-      if (p.anomalies.length) { DB.save(); renderPODetail(); return toast(p.anomalies[0], 'err'); }
-      p.approval = p.chain.ed === 'Approved' ? 'ED Approved' : 'SO Approved'; p.status = 'Approved';
-      p.versions.push({ v: p.versions.length + 1, note: `Approved GM:${p.chain.gm}/SO:${p.chain.so}/ED:${p.chain.ed} + PDF auto-gen`, approval: p.approval });
-      audit('Purchase Order', `Approved (${p.approval}) + PDF + dispatch ready`, p.no);
-      DB.data.notifications.unshift({ t: `${p.no} ${p.approval} — dispatched to Vendor Portal`, age: 'now', urgent: true });
-      DB.save(); renderPOs(); toast(`${p.no} ${p.approval} — PDF generated, vendor notified`); window.print(); });
-    $(document).on('click', '[data-po-amend]', () => { if (!need('po.generate', 'TGMSIDC User role')) return; openModal(`Amend ${poSel} — version controlled`, `<div class="form-grid two-col"><label>Change<input id="amWhat" placeholder="e.g. qty 5→6, rate revision"></label><label>GST %<select id="amGst"><option>12</option><option>18</option><option>5</option></select></label></div><div class="form-actions"><button class="primary" id="amGo">Save as new version (re-approval)</button></div>`); });
-    $(document).on('click', '#amGo', () => { if (!need('po.generate', 'TGMSIDC User role')) return; const p = DB.data.pos.find((x) => x.no === poSel); p.gstPct = +$('#amGst').val(); p.valueLakh = +(poCalc(p).total / 100000).toFixed(2); p.status = 'Amended'; p.approval = 'GM Proposed'; p.chain = { gm: 'Proposed', so: 'Pending', ed: 'Pending' };
-      p.versions.push({ v: p.versions.length + 1, note: 'Amendment: ' + ($('#amWhat').val() || 'terms revision'), approval: 'GM Proposed (re-approval pending)' });
-      audit('Purchase Order', `Amended v${p.versions.length} (re-approval)`, p.no); DB.save(); closeModal(); renderPOs(); toast(`${p.no} amended → v${p.versions.length}, re-approval required`); });
-    $(document).on('click', '[data-po-cancel]', () => { if (!need('po.generate', 'TGMSIDC User role')) return; const p = DB.data.pos.find((x) => x.no === poSel); p.status = 'Cancelled'; p.indentQtyFreed = (p.lines || []).reduce((a, l) => a + l.qty, 0);
-      audit('Purchase Order', `Cancelled — indent qty freed (${p.indentQtyFreed})`, p.no); DB.save(); renderPOs(); toast(`${p.no} cancelled — ${p.indentQtyFreed} units freed to ${p.indent}`, 'err'); });
-    $(document).on('click', '[data-po-dispatch]', () => { if (!need('po.dispatch', 'TGMSIDC User role')) return; const p = DB.data.pos.find((x) => x.no === poSel);
-      if (!/Approv/i.test(p.approval)) return toast('Approve (GM→SO→ED) before dispatch', 'err');
-      p.status = 'Pending Dispatch'; audit('Purchase Order', 'Dispatched to Vendor Portal', p.no);
-      DB.data.notifications.unshift({ t: `${p.no} dispatched — vendor acknowledgement requested`, age: 'now', urgent: true }); DB.save(); renderPOs(); toast(`${p.no} dispatched — vendor notified (Portal)`); });
-    $(document).on('click', '[data-po-ack-ven]', () => { if (!needAny(['vendor.ack', 'vendor.simulate'], 'Vendor role')) return; const p = DB.data.pos.find((x) => x.no === poSel); p.ack = 'Acknowledged'; audit('Purchase Order', 'Vendor acknowledged (Portal)', p.no); DB.save(); renderPOs(); toast(`Vendor acknowledged ${p.no}`); });
+    $('#btnNewPO').on('click', () => { if (!need('po.generate', 'TGMSIDC User role')) return;
+      const n = nextPONo();
+      DB.data.pos.unshift(ensurePOShape({ no: n, indent: '', rc: '', equipment: '', lines: [], valueLakh: 0, gstPct: 12, perfSecurity: '', tc: window.DEMS_MASTERS.LOOKUPS.tcTemplates[0], consignees: [], approval: 'Draft', chain: { gm: 'Pending', so: 'Pending', ed: 'Not required' }, status: 'Draft', ack: 'Pending', versions: [{ v: 1, note: 'Draft shell opened', approval: 'Draft' }], anomalies: [], indentQtyFreed: 0, fy: $('#fySel').val() || '2026-27', poType: 'RC-based', poDate: todayISO(), generatedBy: $('#userName').text() }));
+      audit('Purchase Order', 'Step 1: Draft PO opened', n); DB.save(); poSel = n; renderPOs(); toast(`${n} draft opened — link an approved indent`); $('#poDetail')[0].scrollIntoView({ behavior: 'smooth' }); });
+    $(document).on('change', '#poIndent,#poEquip,#poType', () => { const p = poCur(); if (!p || !/Draft|Returned/.test(p.status)) return; harvestIssue(p);
+      const ind = DB.data.indents.find((x) => x.id === p.indent);
+      const rows = ind ? indentRemain(ind, p.no) : [];
+      if (!rows.some((r) => r.equipment === p.equipment)) p.equipment = (rows[0] || {}).equipment || p.equipment;
+      const row = rows.find((r) => r.equipment === p.equipment);
+      if (row) p.issueQty = row.remain;
+      if (p.poType === 'Local Purchase') { p.rc = ''; p.lines = [{ vendor: '', rank: 'L1', qty: p.issueQty || 0, rate: 0 }]; }
+      else { const rc = rcForEquip(p.equipment, ''); p.rc = rc ? rc.no : ''; if (rc && rc.gstPct) p.gstPct = rc.gstPct; const vs = rcVendors(rc); p.lines = vs.map((v) => ({ ...v, qty: v.rank === 'L1' ? (p.issueQty || 0) : 0 })); }
+      p.consignees = ((row && row.consignees) || []).map((c, i, arr) => ({ institution: c.institution, qty: arr.length === 1 ? (p.issueQty || 0) : 0 }));
+      p.annex1 = (row && row.spec) || p.annex1; renderPODetail(); });
+    $(document).on('click', '[data-po-rc-auth]', () => { if (!need('po.propose', 'GM Equipment role')) return; const p = poCur(); p.rcAuthorized = true; audit('Purchase Order', 'Step 9: GM authorized RC correction', p.no); DB.save(); renderPODetail(); toast('RC correction authorized — set RC details to Yes and continue'); });
+    $(document).on('click', '[data-po-save]', () => { if (!need('po.generate', 'TGMSIDC User role')) return; const p = poCur(); harvestIssue(p); p.valueLakh = +(poCalc(p).total / 100000).toFixed(2); DB.save(); renderPOs(); toast(`${p.no} draft saved`); });
+    $(document).on('click', '[data-po-submit]', () => { if (!need('po.generate', 'TGMSIDC User role')) return; const p = poCur(); harvestIssue(p);
+      const ind = DB.data.indents.find((x) => x.id === p.indent);
+      const row = ind && indentRemain(ind, p.no).find((x) => x.equipment === p.equipment);
+      const rc = p.poType === 'Local Purchase' ? null : rcForEquip(p.equipment, p.rc);
+      const vsum = (p.lines || []).reduce((a, l) => a + (+l.qty || 0), 0);
+      const csum = (p.consignees || []).reduce((a, x) => a + (+x.qty || 0), 0);
+      if (!p.indent || !p.equipment) return toast('Select an approved indent and an equipment line', 'err');
+      if (!(p.issueQty > 0)) return toast('Enter the quantity to issue', 'err');
+      if (row && p.issueQty > row.remain) return toast(`Only ${row.remain} remaining on this indent line`, 'err');
+      if (p.poType !== 'Local Purchase' && (!rc || rc.status === 'Expired' || +rc.daysLeft < 0)) return toast('RC is expired or missing — PO is blocked until it is renewed', 'err');
+      if (p.poType !== 'Local Purchase' && p.rcOk !== 'Yes') return toast('Confirm the RC details are correct before submit', 'err');
+      if (vsum !== +p.issueQty) return toast('Vendor quantities must add up to the issue quantity', 'err');
+      if (csum !== +p.issueQty) return toast('Consignee quantities must add up to the issue quantity', 'err');
+      if (p.psRequired && (+p.psPct < 3 || +p.psPct > 10)) return toast('Performance security % must be between 3 and 10', 'err');
+      if (!String(p.fileNo || '').trim() || !String(p.generatedBy || '').trim()) return toast('File no. and Generated by are required', 'err');
+      p.poDate = todayISO(); p.perfSecurity = p.psRequired ? `${p.psPct}% bank guarantee` : 'Not required';
+      const allocated = (p.lines || []).filter((l) => +l.qty > 0);
+      const pool = (p.consignees || []).map((x) => ({ ...x }));
+      const take = (need) => { const out = []; let left = need; pool.forEach((c) => { if (left <= 0 || c.qty <= 0) return; const n = Math.min(left, c.qty); out.push({ institution: c.institution, qty: n }); c.qty -= n; left -= n; }); return out; };
+      const stamp = (target, line) => { target.lines = [{ ...line }]; target.issueQty = +line.qty; target.consignees = take(+line.qty); target.equipment = p.equipment; target.indent = p.indent; target.rc = p.rc; target.poType = p.poType; target.fy = p.fy; target.gstPct = p.gstPct; target.status = 'Pending PO Approval'; target.approval = 'Pending PO Approval'; target.submittedAt = new Date().toISOString(); target.chain = { gm: 'Pending', so: 'Pending', ed: 'Not required' }; target.valueLakh = +(poCalc(target).total / 100000).toFixed(2); target.anomalies = []; if (poBudget(target).need > poBudget(target).left && poBudget(target).deposited > 0) target.anomalies.push('PO cost exceeds available funds'); };
+      stamp(p, allocated[0]); p.versions.push({ v: p.versions.length + 1, note: 'Submitted for PO approval', approval: 'Pending PO Approval' });
+      const extras = [];
+      allocated.slice(1).forEach((line) => { const n = nextPONo(); const cp = ensurePOShape(deepClone(p)); cp.no = n; cp.versions = [{ v: 1, note: `Split from ${p.no} · ${line.rank} ${line.vendor}`, approval: 'Pending PO Approval' }]; stamp(cp, line); DB.data.pos.unshift(cp); extras.push(cp); });
+      audit('Purchase Order', `Step 16: Submitted${extras.length ? ' + ' + extras.map((x) => x.no).join(', ') : ''}`, p.no);
+      DB.data.notifications.unshift({ t: `${p.no} pending PO approval — GM Equipment`, age: 'now', urgent: true });
+      DB.save(); renderPOs(); toast(extras.length ? `${p.no} plus ${extras.length} more PO(s) — one per vendor` : `${p.no} submitted — GM queue`); });
+    $(document).on('click', '[data-po-gm]', (e) => { if (!need('po.propose', 'GM Equipment role')) return; const p = poCur(); const act = $(e.currentTarget).data('po-gm');
+      if (p.status !== 'Pending PO Approval') return toast('This PO is not in the approval queue', 'err');
+      if (act === 'approve') { p.chain.gm = 'Proposed to Approve'; audit('Purchase Order', 'Sheet 6: GM proposed to approve', p.no); DB.save(); renderPOs(); toast(`${p.no} proposed — SO decision next`); return; }
+      openModal(act === 'return' ? 'GM: Propose return' : 'GM: Propose reject', `<label>Reason *<textarea id="poGmWhy" rows="3" style="width:100%;border:1px solid #d8e0ea;border-radius:7px;padding:6px"></textarea></label><div class="form-err" id="poGmErr"></div><div class="form-actions"><button class="primary" data-po-gm-go="${act}">Confirm</button></div>`); });
+    $(document).on('click', '[data-po-gm-go]', (e) => { if (!need('po.propose', 'GM Equipment role')) return; const why = ($('#poGmWhy').val() || '').trim(); if (!why) { $('#poGmErr').text('Reason is mandatory.'); return; } const p = poCur(); const act = $(e.currentTarget).data('po-gm-go');
+      p.chain.gm = act === 'return' ? 'Proposed to Return' : 'Proposed to Reject'; p.gmNote = why; audit('Purchase Order', `Sheet 6: GM ${p.chain.gm} — ${why}`, p.no); DB.save(); closeModal(); renderPOs(); toast(`${p.no} — ${p.chain.gm}`); });
+    $(document).on('click', '[data-po-so]', (e) => { if (!need('po.approve', 'SO Equipment role')) return; if (curRole() === 'Executive Director') return toast('SO Equipment decides this step', 'err'); const p = poCur(); const act = $(e.currentTarget).data('po-so');
+      if (p.chain.gm === 'Pending') return toast('GM proposal comes first', 'err');
+      if (act !== 'approve') { openModal(act === 'return' ? 'SO: Return for modification' : 'SO: Reject PO', `<label>Comments *<textarea id="poSoWhy" rows="3" style="width:100%;border:1px solid #d8e0ea;border-radius:7px;padding:6px"></textarea></label><div class="form-err" id="poSoErr"></div><div class="form-actions"><button class="primary" data-po-so-go="${act}">Confirm</button></div>`); return; }
+      const high = poCalc(p).total / 100000 > 25;
+      p.chain.so = 'Approved';
+      if (high) { p.chain.ed = 'Pending'; p.approval = 'Pending ED'; audit('Purchase Order', 'Sheet 6: SO approved — ED required above ₹25 L', p.no); DB.save(); renderPOs(); toast(`${p.no} needs ED approval`, 'err'); return; }
+      p.chain.ed = 'Not required'; p.status = 'Approved'; p.approval = 'SO Approved'; p.approvedAt = new Date().toISOString();
+      p.versions.push({ v: p.versions.length + 1, note: 'SO approved → Active PO + PDF', approval: 'SO Approved' });
+      audit('Purchase Order', 'Sheet 6: Approved → vendor notified', p.no);
+      DB.data.notifications.unshift({ t: `${p.no} approved — vendor, consignees and HoD notified`, age: 'now', urgent: true });
+      DB.save(); renderPOs(); toast(`${p.no} approved — PDF generated`); });
+    $(document).on('click', '[data-po-so-go]', (e) => { if (!need('po.approve', 'SO Equipment role')) return; const why = ($('#poSoWhy').val() || '').trim(); if (!why) { $('#poSoErr').text('Comments are mandatory.'); return; } const p = poCur(); const act = $(e.currentTarget).data('po-so-go');
+      if (act === 'return') { p.status = 'Returned for Modification'; p.approval = 'Returned'; p.chain = { gm: 'Pending', so: 'Pending', ed: 'Not required' }; p.returnNote = why; audit('Purchase Order', 'Sheet 6: Returned — ' + why, p.no); DB.data.notifications.unshift({ t: `${p.no} returned to TGMSIDC User`, age: 'now', urgent: true }); }
+      else { p.status = 'Rejected'; p.approval = 'Rejected'; p.chain.so = 'Rejected'; p.indentQtyFreed = (p.lines || []).reduce((a, l) => a + (+l.qty || 0), 0); audit('Purchase Order', `Sheet 6: Rejected — ${why} · qty freed ${p.indentQtyFreed}`, p.no); DB.data.notifications.unshift({ t: `${p.no} rejected — indent qty freed`, age: 'now', urgent: true }); }
+      DB.save(); closeModal(); renderPOs(); toast(`${p.no} ${act === 'return' ? 'returned for modification' : 'rejected'}`, 'err'); });
+    $(document).on('click', '[data-po-ed]', () => { if (!(canDo('po.approve') && (curRole() === 'Executive Director' || curRole() === 'Administrator'))) return toast('ED approval is required above ₹25 L', 'err'); const p = poCur();
+      if (p.chain.ed !== 'Pending') return toast('This PO is not waiting for ED', 'err');
+      p.chain.ed = 'Approved'; p.status = 'Approved'; p.approval = 'ED Approved'; p.approvedAt = new Date().toISOString();
+      p.versions.push({ v: p.versions.length + 1, note: 'ED approved above ₹25 L + PDF', approval: 'ED Approved' });
+      audit('Purchase Order', 'Sheet 6: ED approved', p.no); DB.data.notifications.unshift({ t: `${p.no} ED approved — vendor notified`, age: 'now', urgent: true }); DB.save(); renderPOs(); toast(`${p.no} approved by ED`); });
+    $(document).on('click', '[data-po-dispatch]', () => { if (!need('po.dispatch', 'TGMSIDC User role')) return; const p = poCur();
+      if (!/Approved|ED Approved|SO Approved/.test(p.approval)) return toast('Approve the PO before sending it to the vendor', 'err');
+      p.status = 'Pending Dispatch'; audit('Purchase Order', 'Sent to Vendor Portal', p.no); DB.data.notifications.unshift({ t: `${p.no} on Vendor Portal — acknowledge within 7 days`, age: 'now', urgent: true }); DB.save(); renderPOs(); toast(`${p.no} sent to the vendor portal`); });
+    $(document).on('click', '[data-po-ack-ven]', () => { if (!needAny(['vendor.ack', 'vendor.simulate'], 'Vendor role')) return; const p = poCur(); p.ack = 'Acknowledged'; p.ackAt = new Date().toISOString(); p.dispatchExpect = $('#poDispatchDt').val() || ''; if (p.status === 'Clarification Pending') p.status = 'Approved'; audit('Purchase Order', 'Vendor acknowledged' + (p.dispatchExpect ? ' · dispatch ' + p.dispatchExpect : ''), p.no); DB.save(); renderPOs(); toast(`Vendor acknowledged ${p.no}`); });
+    $(document).on('click', '[data-po-clarify]', () => { if (!needAny(['vendor.ack', 'vendor.simulate'], 'Vendor role')) return; const p = poCur(); p.status = 'Clarification Pending'; audit('Purchase Order', 'Vendor raised a clarification', p.no); DB.data.notifications.unshift({ t: `${p.no} clarification pending`, age: 'now', urgent: true }); DB.save(); renderPOs(); toast(`${p.no} marked clarification pending`, 'err'); });
+    $(document).on('click', '[data-po-amd-new]', () => { if (!need('po.generate', 'TGMSIDC User role')) return; const p = poCur(); if (!poAmendable(p)) return toast('This PO cannot be amended', 'err');
+      const type = $('#amdType').val(), detail = ($('#amdDetail').val() || '').trim(), reason = ($('#amdReason').val() || '').trim();
+      if (!detail || !reason) return toast('Revised detail and justification are required', 'err');
+      const file = $('#amdFile')[0] && $('#amdFile')[0].files[0];
+      const n = (p.amendments || []).length + 1;
+      p.amendment = { ref: `${p.no}-AMD-${n}`, type, detail, reason, doc: file ? file.name : '', status: 'Amendment Pending Approval', financial: /Rate|Quantity/.test(type) };
+      audit('Purchase Order', `Sheet 7: ${p.amendment.ref} submitted`, p.no); DB.data.notifications.unshift({ t: `${p.amendment.ref} pending SO approval`, age: 'now', urgent: true }); DB.save(); renderPOs(); toast(`${p.amendment.ref} submitted for approval`); });
+    const applyAmd = (p) => { const a = p.amendment; const line = p.lines[0]; if (!a || !line) return;
+      if (a.type === 'Quantity change') line.qty = +a.detail || line.qty;
+      if (a.type === 'Rate revision') line.rate = +String(a.detail).replace(/[^\d.]/g, '') || line.rate;
+      if (a.type === 'Delivery date extension') p.deliveryExtend = a.detail;
+      if (a.type === 'Consignee change') p.consignees = [{ institution: a.detail, qty: p.lines.reduce((s, l) => s + (+l.qty || 0), 0) }];
+      p.issueQty = p.lines.reduce((s, l) => s + (+l.qty || 0), 0); p.valueLakh = +(poCalc(p).total / 100000).toFixed(2);
+      a.status = 'Approved'; p.amendments.push(a); p.versions.push({ v: p.versions.length + 1, note: `${a.ref} ${a.type}: ${a.detail}`, approval: 'Approved' }); p.amendment = null; };
+    $(document).on('click', '[data-po-amd]', (e) => { const p = poCur(); const act = $(e.currentTarget).data('po-amd'); if (!p.amendment) return;
+      if (act === 'reject') { if (!need('po.approve', 'SO Equipment role')) return; p.amendment.status = 'Rejected'; p.amendments.push(p.amendment); audit('Purchase Order', p.amendment.ref + ' rejected — original PO unchanged', p.no); p.amendment = null; DB.save(); renderPOs(); toast('Amendment rejected — original PO stands', 'err'); return; }
+      if (act === 'approve') { if (!need('po.approve', 'SO Equipment role') || curRole() === 'Executive Director') return toast('SO Equipment approves the amendment', 'err');
+        if (p.amendment.financial && poCalc(p).total / 100000 > 25) { p.amendment.status = 'Pending ED'; audit('Purchase Order', p.amendment.ref + ' needs ED', p.no); DB.save(); renderPOs(); toast('Financial amendment above ₹25 L needs ED', 'err'); return; }
+        const ref = p.amendment.ref; applyAmd(p); audit('Purchase Order', ref + ' approved — PO updated', p.no); DB.data.notifications.unshift({ t: `${p.no} amended — vendor notified`, age: 'now', urgent: false }); DB.save(); renderPOs(); toast(`${ref} applied`); return; }
+      if (act === 'ed') { if (!(canDo('po.approve') && (curRole() === 'Executive Director' || curRole() === 'Administrator'))) return toast('ED approval is required', 'err'); const ref = p.amendment.ref; applyAmd(p); audit('Purchase Order', ref + ' ED approved', p.no); DB.save(); renderPOs(); toast(`${ref} applied by ED`); } });
+    $(document).on('click', '[data-po-cancel]', () => { if (!need('po.generate', 'TGMSIDC User role')) return; const p = poCur(); if (!poAmendable(p)) return toast('This PO cannot be cancelled', 'err');
+      const reason = ($('#cxReason').val() || '').trim(); if (!reason) return toast('Cancellation reason is mandatory', 'err');
+      const file = $('#cxFile')[0] && $('#cxFile')[0].files[0];
+      p.cancelReq = { reason, doc: file ? file.name : '', status: 'Pending' };
+      audit('Purchase Order', 'Sheet 7: cancellation submitted — ' + reason, p.no); DB.save(); renderPOs(); toast(`${p.no} cancellation is with SO`); });
+    const finishCancel = (p) => { const ordered = (p.lines || []).reduce((a, l) => a + (+l.qty || 0), 0); const got = poReceived(p); const free = Math.max(0, ordered - got);
+      if (got > 0) { let left = got; p.lines.forEach((l) => { const keep = Math.min(+l.qty || 0, left); l.qty = keep; left -= keep; }); p.issueQty = got; p.status = 'Partially Received'; }
+      else p.status = 'Cancelled';
+      p.indentQtyFreed = (p.indentQtyFreed || 0) + free; p.valueLakh = +(poCalc(p).total / 100000).toFixed(2); p.cancelReq.status = 'Approved';
+      p.versions.push({ v: p.versions.length + 1, note: `Cancelled · ${free} qty freed` + (got ? ` · ${got} already received` : ''), approval: 'Cancelled' });
+      audit('Purchase Order', `Cancelled — ${free} qty freed`, p.no); DB.data.notifications.unshift({ t: `${p.no} cancelled — vendor notified`, age: 'now', urgent: true }); };
+    $(document).on('click', '[data-po-cancel-go]', () => { if (!need('po.approve', 'SO Equipment role') || curRole() === 'Executive Director') return toast('SO Equipment approves cancellation', 'err'); const p = poCur(); if (!p.cancelReq) return;
+      if (poCalc(p).total / 100000 > 25) { p.cancelReq.status = 'Pending ED'; audit('Purchase Order', 'Cancellation needs ED', p.no); DB.save(); renderPOs(); toast('Cancellation above ₹25 L needs ED', 'err'); return; }
+      finishCancel(p); DB.save(); renderPOs(); toast(`${p.no} cancelled`, 'err'); });
+    $(document).on('click', '[data-po-cancel-ed]', () => { if (!(canDo('po.approve') && (curRole() === 'Executive Director' || curRole() === 'Administrator'))) return toast('ED approval is required', 'err'); const p = poCur(); if (!p.cancelReq) return; finishCancel(p); DB.save(); renderPOs(); toast(`${p.no} cancelled by ED`, 'err'); });
     $('#btnVendorPortal').on('click', () => { openPage('po'); setTimeout(() => $('#vendorCard')[0].scrollIntoView({ behavior: 'smooth' }), 100); });
     $(document).on('click', '#grvAdd', () => { if (!needAny(['vendor.grievance', 'vendor.simulate'], 'Vendor role')) return; const s = $('#grvSub').val() || 'Clarification requested'; DB.data.grievances.unshift({ id: 'GRV-' + (100 + DB.data.grievances.length + 1), vendor: 'ABC Medical Systems', po: $('#grvPO').val(), subject: s, status: 'Open' }); audit('Vendor Portal', 'Grievance raised', $('#grvPO').val()); DB.save(); renderVendorPortal(); toast('Grievance raised — clarification module notified'); });
     $(document).on('click', '#notifTest', () => { DB.data.notifications.unshift({ t: 'Test: SLA/expiry/status alert (Email + in-app + SMS)', age: 'now', urgent: true }); DB.save(); toast('Notification fired — see bell centre'); });

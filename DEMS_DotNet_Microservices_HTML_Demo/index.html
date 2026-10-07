@@ -129,11 +129,11 @@
 
       <!-- PO: generation (5) + approval (6) + amend/cancel (7) + vendor ack -->
       <section class="page" id="page-po">
-        <div class="page-head"><div><h1>Purchase Orders</h1><p>Indent + active RC link · L1/L2/L3 split · GST auto-calc · T&amp;C · GM→SO→ED · amend / cancel · Vendor Portal ack</p></div>
+        <div class="page-head"><div><h1>Purchase Orders</h1><p>Sheet 5 Issue PO · Sheet 6 PO Approval · Sheet 7 Amendment &amp; Cancel. One PO per vendor. GM proposes, SO approves, ED above ₹25 L.</p></div>
           <div><button class="secondary" id="btnVendorPortal">Vendor Portal view</button> <button class="primary" id="btnNewPO">＋ Generate PO</button></div></div>
         <div class="card"><div class="filters"><div class="search-field">⌕ <input id="poQ" placeholder="Search PO / indent / vendor..."></div>
-          <select id="poStatus"><option>All</option><option>Draft</option><option>Approved</option><option>Pending Dispatch</option><option>Partially Received</option><option>Amended</option><option>Cancelled</option><option>Closed</option></select><button class="secondary" id="poFilterBtn">Filter</button>
-          <span class="spacer"></span><span class="muted">ED approval above ₹25 L · anomaly check pre-dispatch · PDF auto-gen</span></div>
+          <select id="poStatus"><option>All</option><option>New</option><option>Draft</option><option>Pending PO Approval</option><option>Returned for Modification</option><option>Approved</option><option>Pending Dispatch</option><option>Clarification Pending</option><option>Partially Received</option><option>Rejected</option><option>Cancelled</option><option>Closed</option></select><button class="secondary" id="poFilterBtn">Filter</button>
+          <span class="spacer"></span><span class="muted">New = GM queue · aging Green &lt;3d · Amber 3–5d · Red &gt;5d · ED above ₹25 L</span></div>
           <div class="tbl-wrap"><table><thead><tr><th>PO No. (v)</th><th>Indent / RC / Mode</th><th>Vendors L1/L2/L3</th><th>Value (GST)</th><th>Approval GM→SO→ED</th><th>Status / Ack</th><th></th></tr></thead><tbody id="poRows"></tbody></table></div>
           <div class="note">Amend = version + re-approval · Cancel frees indent qty + audit trail · Dispatch notified to Vendor Portal.</div></div>
         <div class="card" id="poDetail"><h3>PO Detail — split, GST, T&amp;C, versions</h3><div class="muted">Select a PO row — vendor split, consignees, GST calc, performance security, versions and ack/dispatch appear here.</div></div>

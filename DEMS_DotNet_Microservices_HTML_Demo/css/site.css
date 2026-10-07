@@ -143,6 +143,8 @@ td small{display:block;color:var(--muted);font-size:12px}
 .doc-attach{display:grid;grid-template-columns:minmax(220px,1fr) minmax(220px,1fr);gap:12px;align-items:end;margin:8px 0 12px}
 .doc-attach label{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3d5166;min-width:0}
 .doc-attach select,.doc-attach input[type=file]{display:block;width:100%;margin:0;background:#fff;border:1px solid #d8e0ea;border-radius:7px;padding:6px 10px;position:relative;z-index:1}
+.po-compare{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:8px}
+@media(max-width:760px){.po-compare{grid-template-columns:1fr}}
 .form-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px;padding-top:8px;border-top:1px solid #edf0f3;flex-wrap:wrap}
 .form-err{color:var(--red);font-size:12px;min-height:18px;margin-top:8px}
 .eq-row{display:grid;grid-template-columns:2fr 2fr .6fr .8fr auto;gap:8px;margin-bottom:8px}
