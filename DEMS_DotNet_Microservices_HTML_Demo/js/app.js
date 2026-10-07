@@ -785,6 +785,23 @@
   function rcProgress(r) { const done = [r.specsFinal, !!(r.tender && r.tender.ref), ...RC_STAGES.map(([k]) => (r.stages[k] || {}).done), !!((r.header.start && r.header.end)), (r.pricing || []).some((p) => +p.rateEx > 0), (r.docs || []).some((d) => d.kind === 'Signed contract copy'), !!r.submitStatus, !!r.gmDecision, !!r.soDecision]; return Math.round(100 * done.filter(Boolean).length / done.length); }
   function nextRCNo() { const n = DB.data.rcs.reduce((a, x) => { const m = /(\d+)$/.exec(x.no || ''); return Math.max(a, m ? +m[1] : 0); }, 12); return 'RC/2026/0' + (n + 1); }
   function rcActiveDup(name, selfNo) { return DB.data.rcs.find((x) => x.no !== selfNo && x.status === 'Active' && String(x.equipment || '').toLowerCase().trim() === String(name || '').toLowerCase().trim()); }
+  function rcLinkableIndents(currentId) { return DB.data.indents.filter((x) => /Approved|Partially/i.test(x.status) || x.id === currentId); }
+  function rcDefaultIndent() { const rows = rcLinkableIndents(); return rows.find((x) => (x.items || []).some((it) => /RC/i.test(it.mode || ''))) || rows[0]; }
+  function indentLine(ind) { const items = (ind && ind.items) || []; return items.find((it) => /RC/i.test(it.mode || '')) || items.find((it) => /Tender/i.test(it.mode || '')) || items[0] || null; }
+  function fillRCFromIndent(r, id) {
+    const ind = DB.data.indents.find((x) => x.id === id); if (!ind) return null;
+    const line = indentLine(ind); if (!line) return null;
+    const m = (window.DEMS_MASTERS.EQUIPMENT_MASTER || []).find((x) => x.name === line.equipment || (line.masterCode && x.code === line.masterCode));
+    r.indentRef = ind.id;
+    r.equipment = line.equipment || r.equipment;
+    r.category = (m && m.category) || line.dept || r.category || 'General';
+    r.department = line.dept || (m && m.dept) || r.department || 'General';
+    r.equipFlag = (line.writeIn || !m) ? 'New – Specs Required' : 'Existing – Specs Available';
+    r.specNote = line.spec || '';
+    if (r.spec && !r.specsFinal) r.spec.revised = line.spec || r.spec.revised || '';
+    if (!(+r.basicRate > 0) && +line.cost > 0) r.basicRate = Math.round((+line.cost * 100000) / Math.max(1, +line.qty || 1));
+    return { ind, line, master: m };
+  }
   async function renderRCs() {
     DB.data.rcs.forEach(ensureRCShape);
     const all = DB.data.rcs;
@@ -810,6 +827,9 @@
   function renderRCDetail() {
     let r = DB.data.rcs.find((x) => x.no === rcSel) || DB.data.rcs[0]; if (!r) { $('#rcDetail').html(emptyState('No RC records.')); return; }
     r = ensureRCShape(r); rcSel = r.no;
+    if (r.status === 'Draft' && !r.indentRef) { const first = rcDefaultIndent(); if (first) fillRCFromIndent(r, first.id); }
+    const linked = DB.data.indents.find((x) => x.id === r.indentRef);
+    const linkedLine = indentLine(linked);
     const prog = rcProgress(r);
     const alert = r.status === 'Cancelled' ? `<span class="badge red">CANCELLED — see Step 16 record · re-tender linked</span>` : r.daysLeft <= 0 ? `<span class="badge red">EXPIRED — close or re-tender</span>` : r.daysLeft <= 30 ? `<span class="badge yellow">${r.daysLeft}d — renewal due (30-day SLA)</span>` : r.daysLeft <= 90 ? `<span class="badge blue">${r.daysLeft}d — watch (90-day SLA)</span>` : `<span class="badge green">${r.daysLeft}d valid</span>`;
     const dis = (r.locked || !canDo('rc.edit')) ? 'disabled' : '';
@@ -829,14 +849,15 @@
       ${r.status === 'Cancelled' ? `<div class="review-box">Cancelled at <b>${esc(r.cancel.stage)}</b> · reason: ${esc(r.cancel.reason)} ${r.cancel.doc ? '· 📄 ' + esc(r.cancel.doc) : ''} · preserved for audit.</div>` : ''}
 
       <div class="phase-card"><div class="phase-head"><h3>Phase 1: RC Initiation &amp; Tender Notice</h3><span class="badge blue">Steps 1–7</span></div>
-      <div class="phase-sec">Initiation · duplicate check</div>
-      <div class="review-box">RC ID (auto): <b>${esc(r.no)}</b> · Flag: <b>${esc(r.equipFlag)}</b> · ${dupHit ? `<span class="badge red">Duplicate: active ${esc(dupHit.no)}</span>` : '<span class="badge green">No active duplicate</span>'} · ${r.status === 'Draft' ? 'Draft' : 'Linked indent: <b>' + esc(r.indentRef || 'direct') + '</b>'}${r.predecessor ? ' · Renewal of <b>' + esc(r.predecessor) + '</b>' : ''}</div>
-      ${r.status === 'Draft' ? `<div class="form-grid" style="margin-top:8px">
-        <label>Equipment (master)<select id="rcEq" ${dis}>${window.DEMS_MASTERS.EQUIPMENT_MASTER.map((m) => `<option value="${m.name}" ${r.equipment === m.name ? 'selected' : ''}>${esc(m.name)} (${esc(m.category || '')})</option>`).join('')}<option value="__WRITEIN__">✎ Write-in (from indent)</option></select></label>
-        <label>Write-in name (if not in master)<input id="rcEqW" placeholder="e.g. Portable Dialysis Unit" ${dis}></label>
-        <label>Category<input id="rcCat" value="${esc(r.category)}" ${dis}></label><label>Department<input id="rcDept" value="${esc(r.department)}" ${dis}></label>
-        <label>Linked indent ref<select id="rcInd" ${dis}><option value="">— direct —</option>${DB.data.indents.filter((x) => /Approved|Partially/i.test(x.status)).map((x) => `<option ${r.indentRef === x.id ? 'selected' : ''}>${esc(x.id)}</option>`).join('')}</select></label>
-      </div>` : ''}
+      <div class="phase-sec">Initiation · linked indent first</div>
+      <div class="form-grid" style="margin-top:8px">
+        <label style="grid-column:1/-1">Linked indent ref<select id="rcInd" ${dis}>${rcLinkableIndents(r.indentRef).map((x) => { const ln = indentLine(x); return `<option value="${esc(x.id)}" ${r.indentRef === x.id ? 'selected' : ''}>${esc(x.id)} · ${esc(ln ? ln.equipment : x.facility)} · ${esc(x.status)}</option>`; }).join('')}</select></label>
+        ${r.status === 'Draft' ? `<label>Equipment (master)<select id="rcEq" ${dis}>${window.DEMS_MASTERS.EQUIPMENT_MASTER.map((m) => `<option value="${m.name}" ${r.equipment === m.name ? 'selected' : ''}>${esc(m.name)} (${esc(m.category || '')})</option>`).join('')}<option value="__WRITEIN__" ${/New/.test(r.equipFlag) ? 'selected' : ''}>✎ Write-in (from indent)</option></select></label>
+        <label>Write-in name (if not in master)<input id="rcEqW" value="${/New/.test(r.equipFlag) ? esc(r.equipment) : ''}" placeholder="e.g. Portable Dialysis Unit" ${dis}></label>
+        <label>Category<input id="rcCat" value="${esc(r.category)}" ${dis}></label><label>Department<input id="rcDept" value="${esc(r.department)}" ${dis}></label>` : ''}
+      </div>
+      <div class="review-box" style="margin-top:8px">RC ID (auto): <b>${esc(r.no)}</b> · Flag: <b>${esc(r.equipFlag)}</b> · ${dupHit ? `<span class="badge red">Duplicate: active ${esc(dupHit.no)}</span>` : '<span class="badge green">No active duplicate</span>'}${r.predecessor ? ' · Renewal of <b>' + esc(r.predecessor) + '</b>' : ''}<br>
+      From <b>${esc(r.indentRef || '—')}</b>${linked ? `: ${esc(linked.facility)} · ${esc(linked.programme || '')} · ${esc(linkedLine ? linkedLine.equipment : '')} × ${linkedLine ? linkedLine.qty : '—'} · spec ${esc(linkedLine ? linkedLine.spec : '—')}` : ''}</div>
 
       <div class="phase-sec">Specifications · doctors committee</div>
       <div class="review-box">${r.specsFinal ? '<span class="badge green">Accepted · Locked</span>' : `<span class="badge yellow">${esc(r.spec.status || 'Pending')}</span>`} · Doctors: ${esc(r.spec.doctors || '—')} ${r.spec.ts ? '· ' + esc(r.spec.ts) : ''}${r.spec.doc ? ' · 📄 ' + esc(r.spec.doc) : ''}</div>
@@ -1285,8 +1306,16 @@
     const rcCur = () => ensureRCShape(DB.data.rcs.find((x) => x.no === rcSel));
     $(document).on('click', '[data-rc-view]', (e) => { rcSel = $(e.currentTarget).data('rc-view'); renderRCDetail(); $('#rcDetail')[0].scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
     $('#btnNewRC').on('click', () => { if (!need('rc.create', 'TGMSIDC User role')) return; const n = nextRCNo(); const eq = window.DEMS_MASTERS.EQUIPMENT_MASTER[0];
-      DB.data.rcs.unshift(ensureRCShape({ no: n, vendor: '', equipment: eq.name, specStatus: 'Pending', specNote: '', tenderStage: 'Draft', tenderHistory: [], bfc: 'Pending', validFrom: '', validTill: '', daysLeft: 365, camc: '3 Years', camcRate: 7, basicRate: 0, gstPct: 12, status: 'Draft', approval: 'Draft', predecessor: null, versions: [], indentRef: '' }));
-      audit('Rate Contract', 'Step 1: Draft initiated (auto ID)', n); DB.save(); rcSel = n; renderRCs(); toast(`${n} draft created — complete Step 1 initiation`); $('#rcDetail')[0].scrollIntoView({ behavior: 'smooth' }); });
+      const rec = ensureRCShape({ no: n, vendor: '', equipment: eq.name, specStatus: 'Pending', specNote: '', tenderStage: 'Draft', tenderHistory: [], bfc: 'Pending', validFrom: '', validTill: '', daysLeft: 365, camc: '3 Years', camcRate: 7, basicRate: 0, gstPct: 12, status: 'Draft', approval: 'Draft', predecessor: null, versions: [], indentRef: '' });
+      const first = rcDefaultIndent(); if (first) fillRCFromIndent(rec, first.id);
+      DB.data.rcs.unshift(rec);
+      audit('Rate Contract', 'Step 1: Draft initiated from ' + (rec.indentRef || 'no indent'), n); DB.save(); rcSel = n; renderRCs(); toast(`${n} opened on ${rec.indentRef || 'no indent'} — ${rec.equipment} filled`); $('#rcDetail')[0].scrollIntoView({ behavior: 'smooth' }); });
+    $(document).on('change', '#rcInd', () => { const r = rcCur(); if (!r || r.locked) return;
+      if ($('#rcTRef').length) r.tender = { ...r.tender, ref: $('#rcTRef').val() || '', date: $('#rcTDate').val() || '', type: $('#rcTType').val(), portal: $('#rcTPortal').val(), openingDate: $('#rs_opened_openingDate').val() || '', bidStart: $('#rs_opened_bidStart').val() || '', bidEnd: $('#rs_opened_bidEnd').val() || '', remarks: $('#rs_opened_remarks').val() || '' };
+      const id = $('#rcInd').val();
+      if (r.specsFinal) { r.indentRef = id; DB.save(); renderRCDetail(); return toast('Indent link updated. Specs stay locked.', 'err'); }
+      const got = fillRCFromIndent(r, id); if (!got) return;
+      DB.save(); renderRCDetail(); toast(`${id} loaded — ${got.line.equipment} · ${got.line.dept || got.line.spec || 'spec'} filled`); });
     // Step 1: initiation
     $(document).on('click', '[data-rc-s1]', () => { if (!need('rc.create', 'TGMSIDC User role')) return; const r = rcCur(); const pick = $('#rcEq').val(); const wname = ($('#rcEqW').val() || '').trim();
       const name = pick === '__WRITEIN__' ? wname : pick;
