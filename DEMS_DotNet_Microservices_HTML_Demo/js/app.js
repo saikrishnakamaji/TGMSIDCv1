@@ -559,6 +559,7 @@
   let approvalId = 'IND-2026-00124';
   let apprActor = 'TGMSIDC User';
   let apprDocIdx = 0;
+  let apprAuditOpen = false;
   function apprStage(r) {
     if (/Approved/i.test(r.status)) return 4;
     if (/Propos|Pending Approval/i.test(r.status)) return 3; // GM proposal pending
@@ -681,13 +682,15 @@
     $('#approvalCard').html(`
       <div class="detail-top"><div><small>INDENT NUMBER · ${esc(r.deo || 'DEO')} · ${esc(r.hodFacility || '')} · TRK ${esc(r.trackingId || '—')}</small><h2>${esc(r.id)}</h2><p>Ref ${esc(r.refNo || '—')} · Indent date ${esc(r.indentDate || '—')} · ${esc(r.facility)} · ${esc(r.district || '')} · ₹${r.valueLakh} L · ${esc(r.programme)} / ${esc(r.source)} / ${esc(r.head)}</p><p>${ageBadge(r)} <span class="muted">review aging: Green &lt;2d · Amber 2–3d · Red &gt;3d</span></p>${r.returnComments ? `<p><span class="badge yellow">↩ Returned by TGMSIDC: ${esc(r.returnComments)}</span></p>` : ''}</div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${badge(r.status === 'Submitted' ? 'Under Verification' : r.status)}
-        <span class="badge blue">${esc(layerName)}</span></div></div>
+        <span class="badge blue">${esc(layerName)}</span>
+        <button type="button" class="secondary" data-appr-audit>${apprAuditOpen ? 'Hide audit trail' : 'Show audit trail'}</button></div></div>
       <div class="workflow">${['DEO<br><small>Submitted</small>', 'TGMSIDC<br><small>Verification</small>', 'GM Equipment<br><small>Proposal + mode</small>', 'SO Equipment<br><small>Approval</small>'].map((l, i) => `${i ? '<em></em>' : ''}<div class="wstep ${i + 1 < stage ? 'done' : i + 1 === stage ? 'active' : ''}"><i>${i + 1 < stage ? '✓' : i + 1}</i><b>${l}</b></div>`).join('')}</div>
 
-      <div class="appr-grid">
+      <div class="appr-grid ${apprAuditOpen ? 'audit-on' : 'audit-off'}">
       <div class="appr-main">
-      ${showTG ? `<div class="appr-layer">
-      <h3 class="subhead" style="margin-top:0">Layer 1 · TGMSIDC verification <small style="color:#6f7f93">against scanned copy · edits audited · write-in resolved here</small></h3>
+      ${showTG ? `<div class="appr-layer tg-focus">
+      <div class="layer-title"><h3>Layer 1 · TGMSIDC verification</h3><span class="badge blue">Your verification</span></div>
+      <p class="layer-lead">Compare every line to the scanned copy. Edits are audited. Write-in items are resolved here before the indent can move to GM.</p>
       <div class="doc-tabs">${docs.map((d, i) => `<button class="rowbtn ${i === apprDocIdx ? 'on' : ''}" data-doc="${i}">📄 ${esc(d.name)}</button>`).join('') || '<span class="muted">No scanned copy — return to DEO for upload.</span>'}</div>
       <div class="document">📄<b>${esc(docs[apprDocIdx]?.name || 'No document')}</b><small>${esc((docs[apprDocIdx]?.type || '') + ' · scanned copy viewer (PDF/JPG/PNG)')}</small><div class="doc-lines"></div><small>Compare each row below against this scanned copy before verifying.</small></div>
       <div class="review-box" style="margin-top:10px"><b>Step-10 review checklist vs scanned copy</b><br>${reviewChecklist(r).map((x) => `<div class="${x.ok ? 'ok-tx' : 'bad-tx'}">${x.ok ? '✓' : '○'} ${esc(x.label)}</div>`).join('')}</div>
@@ -792,6 +795,7 @@
     const ind = DB.data.indents.find((x) => x.id === id); if (!ind) return null;
     const line = indentLine(ind); if (!line) return null;
     const m = (window.DEMS_MASTERS.EQUIPMENT_MASTER || []).find((x) => x.name === line.equipment || (line.masterCode && x.code === line.masterCode));
+    if (r.indentRef && r.indentRef !== id) { r.specCustom = ''; rcSpecEdit = false; }
     r.indentRef = ind.id;
     r.equipment = line.equipment || r.equipment;
     r.category = (m && m.category) || line.dept || r.category || 'General';
@@ -818,9 +822,41 @@
     renderRCDetail();
   }
   const RC_DOC_KINDS = ['Signed contract copy', 'Tender evaluation report', 'BFC approval document', 'Technical committee recommendation', 'Specification confirmation', 'Signed spec document', 'Pre-bid queries', 'Pre-bid responses', 'Amended tender', 'Bid evaluation report', 'Tech evaluation report', 'Financial bid comparison', 'BFC minutes', 'BFC approval', 'Cancellation support', 'Other'];
+  const P2_FLOW = ['prebid', 'amend', 'bideval', 'demotech', 'techdec', 'finbid', 'bfcmeet', 'bfcdec', 'header', 'price', 'docs'];
+  let rcP2Open = '';
+  let rcSpecEdit = false;
+  function p2Saved(r, key) {
+    if (key === 'header') return !!r.p2Header;
+    if (key === 'price') return !!r.p2Price;
+    if (key === 'docs') return (r.docs || []).some((d) => d.kind === 'Signed contract copy');
+    return !!(r.stages[key] || {}).done;
+  }
+  function p2Collapsed(key, title, saved) {
+    return `<div class="fund-card rc-step-done"><b>${title}</b> ${saved ? '<span class="badge green">✓ saved</span>' : '<span class="badge gray">up next</span>'} <button type="button" class="rowbtn" data-rc-reopen="${key}">Edit</button></div>`;
+  }
+  function p2View(r) {
+    const mature = r.locked || !!r.submitStatus || /Active|Expiring|Expired|Closed|Cancelled/i.test(r.status);
+    if (mature) return { show: () => true, expand: () => true };
+    const frontier = P2_FLOW.findIndex((k) => !p2Saved(r, k));
+    const last = frontier < 0 ? P2_FLOW.length - 1 : frontier;
+    const oi = P2_FLOW.indexOf(rcP2Open);
+    const open = oi >= 0 && oi <= last ? rcP2Open : P2_FLOW[last];
+    return { show: (k) => P2_FLOW.indexOf(k) <= last, expand: (k) => k === open };
+  }
+  function p2Gate(r, key, title, html) {
+    const v = p2View(r);
+    if (!v.show(key)) return '';
+    if (!v.expand(key)) return p2Collapsed(key, title, p2Saved(r, key));
+    return html;
+  }
+  function advanceP2(key) { const i = P2_FLOW.indexOf(key); if (i >= 0 && P2_FLOW[i + 1]) rcP2Open = P2_FLOW[i + 1]; }
   const monthsAdd = (iso, m) => { if (!iso) return ''; const d = new Date(iso + 'T00:00:00'); if (isNaN(d)) return ''; d.setMonth(d.getMonth() + (+m || 0)); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); };
-  function rcStageCard(r, key, title, inner) { const s = r.stages[key] || {};
-    return `<div class="fund-card"><b>${title}</b> ${s.done ? '<span class="badge green">✓ done</span>' : '<span class="badge gray">pending</span>'}
+  function rcStageCard(r, key, title, inner) {
+    const v = p2View(r);
+    if (!v.show(key)) return '';
+    const s = r.stages[key] || {};
+    if (!v.expand(key)) return p2Collapsed(key, title, !!(r.stages[key] || {}).done);
+    return `<div class="fund-card rc-step-open"><b>${title}</b> ${s.done ? '<span class="badge green">✓ done</span>' : '<span class="badge blue">current</span>'}
     <div class="form-grid" style="margin-top:8px">${inner}</div>
     <div class="form-actions" style="justify-content:flex-start;margin-top:8px"><button class="secondary" data-rc-stage="${key}" ${(r.locked || !canDo('rc.edit')) ? 'disabled title="Requires TGMSIDC User role"' : ''}>Save ${title.split('·')[0].trim()}</button></div></div>`; }
   function rcFileDrop(kind, stageSet) { return `<label class="drop" style="grid-column:1/-1">＋ Upload ${esc(kind)} (PDF/JPG/PNG ≤30MB)<input type="file" data-rcfile="${esc(kind)}" ${stageSet ? `data-stage-set="${stageSet}"` : ''} hidden accept=".pdf,.jpg,.jpeg,.png"></label>`; }
@@ -830,6 +866,8 @@
     if (r.status === 'Draft' && !r.indentRef) { const first = rcDefaultIndent(); if (first) fillRCFromIndent(r, first.id); }
     const linked = DB.data.indents.find((x) => x.id === r.indentRef);
     const linkedLine = indentLine(linked);
+    const masterEq = (window.DEMS_MASTERS.EQUIPMENT_MASTER || []).find((m) => m.name === (linkedLine ? linkedLine.equipment : r.equipment) || (linkedLine && linkedLine.masterCode && m.code === linkedLine.masterCode));
+    const masterSpec = (masterEq && masterEq.spec) || (linkedLine && linkedLine.spec) || r.specNote || '—';
     const prog = rcProgress(r);
     const alert = r.status === 'Cancelled' ? `<span class="badge red">CANCELLED — see Step 16 record · re-tender linked</span>` : r.daysLeft <= 0 ? `<span class="badge red">EXPIRED — close or re-tender</span>` : r.daysLeft <= 30 ? `<span class="badge yellow">${r.daysLeft}d — renewal due (30-day SLA)</span>` : r.daysLeft <= 90 ? `<span class="badge blue">${r.daysLeft}d — watch (90-day SLA)</span>` : `<span class="badge green">${r.daysLeft}d valid</span>`;
     const dis = (r.locked || !canDo('rc.edit')) ? 'disabled' : '';
@@ -857,7 +895,13 @@
         <label>Category<input id="rcCat" value="${esc(r.category)}" ${dis}></label><label>Department<input id="rcDept" value="${esc(r.department)}" ${dis}></label>` : ''}
       </div>
       <div class="review-box" style="margin-top:8px">RC ID (auto): <b>${esc(r.no)}</b> · Flag: <b>${esc(r.equipFlag)}</b> · ${dupHit ? `<span class="badge red">Duplicate: active ${esc(dupHit.no)}</span>` : '<span class="badge green">No active duplicate</span>'}${r.predecessor ? ' · Renewal of <b>' + esc(r.predecessor) + '</b>' : ''}<br>
-      From <b>${esc(r.indentRef || '—')}</b>${linked ? `: ${esc(linked.facility)} · ${esc(linked.programme || '')} · ${esc(linkedLine ? linkedLine.equipment : '')} × ${linkedLine ? linkedLine.qty : '—'} · spec ${esc(linkedLine ? linkedLine.spec : '—')}` : ''}</div>
+      From <b>${esc(r.indentRef || '—')}</b>${linked ? `: ${esc(linked.facility)} · ${esc(linked.programme || '')}` : ''}</div>
+      <div class="indent-spec">
+        <div class="indent-spec-item"><small>Linked item</small><b>${esc(linkedLine ? linkedLine.equipment : r.equipment)}</b><span>${esc((linkedLine && linkedLine.dept) || r.department || '')}${linkedLine ? ' · qty ' + linkedLine.qty : ''}</span></div>
+        <div class="indent-spec-body"><small>Master specification</small><p>${esc(masterSpec)}</p>${r.specCustom ? `<small>Write-in override</small><p>${esc(r.specCustom)}</p>` : ''}</div>
+        <button type="button" class="secondary" data-rc-spec-edit ${(r.specsFinal || r.locked || !canDo('rc.edit')) ? 'disabled' : ''}>Edit / Write-in</button>
+      </div>
+      ${rcSpecEdit && !r.specsFinal ? `<label class="indent-spec-edit">Custom specification<textarea id="rcSpecCustom" rows="3">${esc(r.specCustom || masterSpec)}</textarea></label><div class="form-actions" style="justify-content:flex-start"><button type="button" class="primary" data-rc-spec-apply>Apply write-in spec</button></div>` : ''}
 
       <div class="phase-sec">Specifications · doctors committee</div>
       <div class="review-box">${r.specsFinal ? '<span class="badge green">Accepted · Locked</span>' : `<span class="badge yellow">${esc(r.spec.status || 'Pending')}</span>`} · Doctors: ${esc(r.spec.doctors || '—')} ${r.spec.ts ? '· ' + esc(r.spec.ts) : ''}${r.spec.doc ? ' · 📄 ' + esc(r.spec.doc) : ''}</div>
@@ -887,7 +931,7 @@
       <div class="form-actions" style="justify-content:flex-start"><button class="primary" data-rc-phase1 ${phase1Dis}>Save Initiation &amp; Tender Details</button></div>
       </div>
 
-      <div class="phase-card"><div class="phase-head"><h3>Phase 2: Tender Evaluation, BFC, Commercials &amp; Final Submission</h3><span class="badge blue">Steps 8–22</span></div>
+      <div class="phase-card"><div class="phase-head"><h3>Phase 2: Tender Evaluation, BFC, Commercials &amp; Final Submission</h3><span class="badge blue">Steps 8–22 · one step at a time</span></div>
       <div class="phase-sec">Pre-bid, amendments, evaluation</div>
       ${rcStageCard(r, 'prebid', '8 · Pre-bid Queries', `<label>Queries received<select id="rs_prebid_got"><option ${r.stages.prebid.got === 'No' ? 'selected' : ''}>No</option><option ${r.stages.prebid.got === 'Yes' ? 'selected' : ''}>Yes</option></select></label><label>Meeting date<input id="rs_prebid_meet" type="date" value="${esc(r.stages.prebid.meet || '')}" ${dis}></label>${rcFileDrop('Pre-bid queries')}${rcFileDrop('Pre-bid responses')}`)}
       ${rcStageCard(r, 'amend', '9 · Amendments', `<label>Amendments made<select id="rs_amend_got"><option ${r.stages.amend.got === 'No' ? 'selected' : ''}>No</option><option ${r.stages.amend.got === 'Yes' ? 'selected' : ''}>Yes</option></select></label><label>Amend date<input id="rs_amend_date" type="date" value="${esc(r.stages.amend.date || '')}" ${dis}></label><label style="grid-column:1/-1">Summary<input id="rs_amend_summary" value="${esc(r.stages.amend.summary || '')}" ${dis}></label>${rcFileDrop('Amended tender')}`)}
@@ -898,7 +942,7 @@
       ${rcStageCard(r, 'bfcmeet', '14 · BFC Meeting', `<label>Tentative date<input id="rs_bfcmeet_tent" type="date" value="${esc(r.stages.bfcmeet.tent || '')}" ${dis}></label><label>Actual date<input id="rs_bfcmeet_actual" type="date" value="${esc(r.stages.bfcmeet.actual || '')}" ${dis}></label><label>Members present<input id="rs_bfcmeet_members" value="${esc(r.stages.bfcmeet.members || '')}" ${dis}></label>${rcFileDrop('BFC minutes')}`)}
       ${rcStageCard(r, 'bfcdec', '15 · BFC Approved? *', `<label>Decision<select id="rs_bfcdec_yes"><option value="">— Decide —</option><option ${r.stages.bfcdec.yes === 'Yes' ? 'selected' : ''}>Yes</option><option ${r.stages.bfcdec.yes === 'No' ? 'selected' : ''}>No</option></select></label><label>Approval ref no.<input id="rs_bfcdec_refNo" value="${esc(r.stages.bfcdec.refNo || '')}" ${dis}></label><label>Approval date<input id="rs_bfcdec_refDate" type="date" value="${esc(r.stages.bfcdec.refDate || '')}" ${dis}></label>${rcFileDrop('BFC approval')}${r.stages.bfcdec.yes === 'No' ? '<div class="form-err">BFC rejected — use Cancel Tender. A fresh tender starts from Phase 1.</div>' : ''}`)}
 
-      <div class="phase-sec">RC header, bank, pricing &amp; CAMC</div>
+      ${p2Gate(r, 'header', '17 · RC header + bank', `<div class="phase-sec">RC header, bank, pricing &amp; CAMC</div>
       <div class="form-grid two-col"><label>Award date<input id="rh_award" type="date" value="${esc(r.header.award)}" ${dis}></label>
       <label>Contract start (From)<input id="rh_start" type="date" value="${esc(r.header.start)}" ${dis}></label>
       <label>Contract end (To)<input id="rh_end" type="date" value="${esc(r.header.end)}" ${dis}></label>
@@ -907,9 +951,9 @@
       <label>Validity (auto months) — BFC/tender linked<input value="${esc(r.tender.ref)} · ${esc(r.stages.bfcdec.refNo || 'BFC pending')}" readonly style="background:#f4f7fa"></label></div>
       <div class="review-box" style="margin-top:8px">Auto-fetch from tender ref <b>${esc(r.tender.ref || '—')}</b>: bid ${esc(r.tender.date || '—')} · portal ${esc(r.tender.portal)} · suppliers L1 ${esc(r.stages.finbid.l1v || L1.vendor || '—')} / L2 ${esc(r.stages.finbid.l2v || '—')} / L3 ${esc(r.stages.finbid.l3v || '—')} · equipment ${esc(r.equipment)}</div>
       ${(r.pricing || []).map((p, i) => `<div class="form-grid" style="margin-top:8px"><label>${esc(p.rank)} bank<input data-bank="${i}:bank" value="${esc((r.bank[i] || {}).bank || '')}" placeholder="Bank name" ${dis}></label><label>Branch<input data-bank="${i}:branch" value="${esc((r.bank[i] || {}).branch || '')}" ${dis}></label><label>IFSC (11-char)<input data-bank="${i}:ifsc" value="${esc((r.bank[i] || {}).ifsc || '')}" placeholder="HDFC0001234" ${dis}></label><label>Account no.<input data-bank="${i}:acct" value="${esc((r.bank[i] || {}).acct || '')}" ${dis}></label></div>`).join('')}
-      <div class="form-actions" style="justify-content:flex-start;margin-top:8px"><button class="secondary" data-rc-header ${dis}>Save header + bank</button></div>
+      <div class="form-actions" style="justify-content:flex-start;margin-top:8px"><button class="secondary" data-rc-header ${dis}>Save header + bank</button></div>`)}
 
-      <div class="phase-sec">Pricing &amp; CAMC · incl-tax auto · GST slab</div>
+      ${p2Gate(r, 'price', '19 · Pricing & CAMC', `<div class="phase-sec">Pricing &amp; CAMC · incl-tax auto · GST slab</div>
       ${(r.pricing || []).map((p, i) => `<div class="fund-card"><b>${esc(p.rank)}</b> · ${esc(p.vendor || '—')}
         <div class="form-grid" style="margin-top:8px"><label>Vendor<select data-px="${i}:vendor">${window.DEMS_MASTERS.VENDOR_MASTER.map((v) => `<option ${p.vendor === v.name ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></label>
         <label>Rate/unit excl tax ₹<input type="number" data-px="${i}:rateEx" value="${p.rateEx}" ${dis}></label>
@@ -922,9 +966,9 @@
       <label>CAMC rate/yr ₹<input id="rcCamcR" type="number" value="${r.camc.rateYr}" ${dis}></label>
       <label>CAMC start (auto = warranty end +1)<input id="rcCamcS" value="${esc(r.camc.start || monthsAdd(r.header.start, L1.warrantyMo || 36))}" ${dis}></label>
       <label style="grid-column:1/-1">CAMC terms<input id="rcCamcT" value="${esc(r.camc.terms)}" ${dis}></label></div>
-      <div class="form-actions" style="justify-content:flex-start;margin-top:8px"><button class="secondary" data-rc-price ${dis}>Save pricing + CAMC</button></div>
+      <div class="form-actions" style="justify-content:flex-start;margin-top:8px"><button class="secondary" data-rc-price ${dis}>Save pricing + CAMC</button></div>`)}
 
-      <div class="phase-sec">Document checklist · contract + BFC approval required</div>
+      ${p2Gate(r, 'docs', '21 · Documents & submit', `<div class="phase-sec">Document checklist · contract + BFC approval required</div>
       <div class="upload">${r.docs.map((d, di) => `<div>📄 <b>${esc(d.name)}</b><small>${esc(d.kind)}${d.sizeMB ? ' · ' + d.sizeMB + ' MB' : ''}</small><button class="rowbtn" data-rc-docdel="${di}" ${canDo('rc.edit') ? '' : 'disabled'} style="position:absolute;right:8px;top:8px">✕</button></div>`).join('')}<label class="drop">＋ Upload<select id="rcDocKind" style="min-height:28px;margin:4px 0">${RC_DOC_KINDS.map((k) => `<option>${k}</option>`).join('')}</select><input type="file" id="rcDocFile" hidden accept=".pdf,.jpg,.jpeg,.png"></label></div>
 
       <div class="phase-sec">Submission readiness</div>
@@ -933,7 +977,7 @@
       <div class="form-actions" style="justify-content:flex-start;flex-wrap:wrap">
         ${!r.submitStatus ? `<button class="primary" data-rc-submit ${canDo('rc.edit') ? '' : 'disabled title="Requires TGMSIDC User role"'}>Submit for RC approval (lock) →</button>` : '<span class="muted">Record locked pending GM / SO.</span>'}
       </div>
-      ${!canDo('rc.edit') && !r.locked ? '<div class="muted">🔒 Section editing needs TGMSIDC User role — you have read-only access.</div>' : ''}
+      ${!canDo('rc.edit') && !r.locked ? '<div class="muted">🔒 Section editing needs TGMSIDC User role — you have read-only access.</div>' : ''}`)}
       </div>
 
       <div class="phase-card"><div class="phase-head"><h3>Stage 3: Executive Approval &amp; Lifecycle</h3><span class="badge blue">GM · SO · Amend / Renew / Close</span></div>
@@ -1304,18 +1348,28 @@
 
     // RC workspace (Annexure-A §3, 24 steps): staged saves + lifecycle
     const rcCur = () => ensureRCShape(DB.data.rcs.find((x) => x.no === rcSel));
-    $(document).on('click', '[data-rc-view]', (e) => { rcSel = $(e.currentTarget).data('rc-view'); renderRCDetail(); $('#rcDetail')[0].scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
+    $(document).on('click', '[data-rc-view]', (e) => { rcSel = $(e.currentTarget).data('rc-view'); rcP2Open = ''; rcSpecEdit = false; renderRCDetail(); $('#rcDetail')[0].scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
     $('#btnNewRC').on('click', () => { if (!need('rc.create', 'TGMSIDC User role')) return; const n = nextRCNo(); const eq = window.DEMS_MASTERS.EQUIPMENT_MASTER[0];
       const rec = ensureRCShape({ no: n, vendor: '', equipment: eq.name, specStatus: 'Pending', specNote: '', tenderStage: 'Draft', tenderHistory: [], bfc: 'Pending', validFrom: '', validTill: '', daysLeft: 365, camc: '3 Years', camcRate: 7, basicRate: 0, gstPct: 12, status: 'Draft', approval: 'Draft', predecessor: null, versions: [], indentRef: '' });
       const first = rcDefaultIndent(); if (first) fillRCFromIndent(rec, first.id);
       DB.data.rcs.unshift(rec);
-      audit('Rate Contract', 'Step 1: Draft initiated from ' + (rec.indentRef || 'no indent'), n); DB.save(); rcSel = n; renderRCs(); toast(`${n} opened on ${rec.indentRef || 'no indent'} — ${rec.equipment} filled`); $('#rcDetail')[0].scrollIntoView({ behavior: 'smooth' }); });
+      audit('Rate Contract', 'Step 1: Draft initiated from ' + (rec.indentRef || 'no indent'), n); DB.save(); rcSel = n; rcP2Open = ''; rcSpecEdit = false; renderRCs(); toast(`${n} opened on ${rec.indentRef || 'no indent'} — ${rec.equipment} filled`); $('#rcDetail')[0].scrollIntoView({ behavior: 'smooth' }); });
     $(document).on('change', '#rcInd', () => { const r = rcCur(); if (!r || r.locked) return;
       if ($('#rcTRef').length) r.tender = { ...r.tender, ref: $('#rcTRef').val() || '', date: $('#rcTDate').val() || '', type: $('#rcTType').val(), portal: $('#rcTPortal').val(), openingDate: $('#rs_opened_openingDate').val() || '', bidStart: $('#rs_opened_bidStart').val() || '', bidEnd: $('#rs_opened_bidEnd').val() || '', remarks: $('#rs_opened_remarks').val() || '' };
       const id = $('#rcInd').val();
       if (r.specsFinal) { r.indentRef = id; DB.save(); renderRCDetail(); return toast('Indent link updated. Specs stay locked.', 'err'); }
       const got = fillRCFromIndent(r, id); if (!got) return;
-      DB.save(); renderRCDetail(); toast(`${id} loaded — ${got.line.equipment} · ${got.line.dept || got.line.spec || 'spec'} filled`); });
+      DB.save(); renderRCDetail(); toast(`${id} loaded — ${got.line.equipment} · master spec shown`); });
+    $(document).on('click', '[data-rc-spec-edit]', () => { const r = rcCur(); if (!r || r.locked || r.specsFinal) return; if (!need('rc.edit', 'TGMSIDC User role')) return; rcSpecEdit = !rcSpecEdit; renderRCDetail(); });
+    $(document).on('click', '[data-rc-spec-apply]', () => { if (!need('rc.edit', 'TGMSIDC User role')) return; const r = rcCur(); if (!r || r.specsFinal) return;
+      const t = ($('#rcSpecCustom').val() || '').trim(); if (!t) return toast('Enter the specification', 'err');
+      const master = (window.DEMS_MASTERS.EQUIPMENT_MASTER || []).find((m) => m.name === r.equipment);
+      r.specCustom = t; r.specNote = t;
+      if (r.spec) r.spec.revised = t;
+      if (!master || t !== master.spec) r.equipFlag = 'New – Specs Required';
+      rcSpecEdit = false; audit('Rate Contract', 'Linked indent spec written in', r.no); DB.save(); renderRCDetail(); toast('Custom specification applied'); });
+    $(document).on('click', '[data-rc-reopen]', (e) => { rcP2Open = $(e.currentTarget).data('rc-reopen'); renderRCDetail(); });
+    $(document).on('click', '[data-appr-audit]', () => { apprAuditOpen = !apprAuditOpen; renderApproval(); });
     // Step 1: initiation
     $(document).on('click', '[data-rc-s1]', () => { if (!need('rc.create', 'TGMSIDC User role')) return; const r = rcCur(); const pick = $('#rcEq').val(); const wname = ($('#rcEqW').val() || '').trim();
       const name = pick === '__WRITEIN__' ? wname : pick;
@@ -1383,6 +1437,7 @@
       if (key === 'bfcdec') { r.bfc = s.yes === 'Yes' ? 'Approved' : 'Rejected'; if (s.yes === 'No') toast('BFC rejected — cancel tender (Step 16); fresh tender from Step 6', 'err'); }
       const labels = { opened: 'Tender Opened', prebid: 'Pre-bid Queries Stage', amend: 'Amendments Stage', bideval: 'Bid Evaluation Stage', demotech: 'Demo & Technical Evaluation Stage', techdec: 'Tech Committee ' + s.yes, finbid: 'Financial Bid & BFC Prep Stage', bfcmeet: 'BFC Stage', bfcdec: s.yes === 'Yes' ? 'BFC Approved' : 'BFC Decision' };
       r.tenderStage = labels[key]; r.tenderHistory.push(labels[key]);
+      advanceP2(key);
       audit('Rate Contract', `Step 7–15: ${labels[key]} recorded`, r.no); DB.save(); renderRCs(); toast(`${labels[key]} saved`); });
     // Generic RC document uploads (PDF/JPG/PNG ≤30MB)
     $(document).on('change', '[data-rcfile]', (e) => { if (!need('rc.edit', 'TGMSIDC User role')) return; const f = e.target.files[0]; if (!f) return; if (!/\.(pdf|jpg|jpeg|png)$/i.test(f.name)) return toast('Only PDF / JPG / PNG allowed', 'err');
@@ -1419,6 +1474,7 @@
         if ((ifsc || acct) && acct.replace(/\D/g, '').length < 9) { renderRCDetail(); return toast(`Row ${r.pricing[i].rank}: bank account no. too short`, 'err'); }
         r.bank[i] = { vendor: r.pricing[i].vendor, bank: g('bank'), branch: g('branch'), ifsc: ifsc.toUpperCase(), acct }; }
       if (DB.data.rcs.some((x) => x.no !== r.no && x.no === r.no)) return toast('RC ref duplicate — blocked', 'err');
+      r.p2Header = true; advanceP2('header');
       audit('Rate Contract', `Steps 17–18: header ${start}→${end} (${mo} months) + bank details`, r.no); DB.save(); renderRCs();
       toast(mo > 24 ? `${r.no} header saved — validity ${mo} months is unusual (>24mo alert)` : `${r.no} header + bank saved`); });
     // Steps 19–20: pricing + CAMC
@@ -1430,7 +1486,7 @@
       if (+L1.rateEx > 0 && +r.stages.finbid.l1r > 0 && +L1.rateEx !== +r.stages.finbid.l1r) toast(`Note: L1 rate ₹${L1.rateEx} differs from BFC-approved ₹${r.stages.finbid.l1r}`, 'err');
       r.vendor = L1.vendor || r.vendor; r.basicRate = +L1.rateEx || 0; r.gstPct = +L1.gst || 0;
       r.camc = { applicable: $('#rcCamcA').val(), years: +$('#rcCamcY').val() || 0, rateYr: +$('#rcCamcR').val() || 0, start: $('#rcCamcS').val() || monthsAdd(r.header.start, L1.warrantyMo || 36), terms: $('#rcCamcT').val() || '' };
-      r.camcRate = r.camc.years;
+      r.camcRate = r.camc.years; r.p2Price = true; advanceP2('price');
       audit('Rate Contract', `Steps 19–20: pricing L1 ₹${L1.rateEx}+${L1.gst}% + CAMC ${r.camc.applicable} ${r.camc.years}Y`, r.no); DB.save(); renderRCs(); toast(`${r.no} pricing + CAMC saved (rate history kept)`); });
     // Step 22: submit (lock)
     $(document).on('click', '[data-rc-submit]', () => { if (!need('rc.edit', 'TGMSIDC User role')) return; const r = rcCur();
