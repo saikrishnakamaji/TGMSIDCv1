@@ -75,14 +75,14 @@
    * Sidebar, dashboards, queues and every action button follow this matrix.
    * Administrator bypasses all checks. */
   const ROLE_ACCESS = {
-    'Administrator': ['dashboard', 'indents', 'newindent', 'approval', 'rc', 'po', 'delivery', 'qa', 'masters', 'reports', 'audit'],
-    'TGMSIDC User': ['dashboard', 'indents', 'approval', 'rc', 'po', 'delivery', 'qa', 'masters', 'reports', 'audit'],
-    'GM Equipment': ['dashboard', 'approval', 'rc', 'po', 'reports', 'audit'],
-    'SO Equipment': ['dashboard', 'approval', 'rc', 'po', 'reports', 'audit'],
-    'Executive Director': ['dashboard', 'po', 'reports', 'audit'],
-    'DEO · HoD Facility': ['dashboard', 'indents', 'newindent', 'approval', 'reports'],
-    'Consignee': ['dashboard', 'delivery', 'qa', 'reports'],
-    'Vendor': ['dashboard', 'po', 'reports']
+    'Administrator': ['dashboard', 'indents', 'tracker', 'newindent', 'approval', 'rc', 'po', 'delivery', 'qa', 'masters', 'reports', 'audit'],
+    'TGMSIDC User': ['dashboard', 'indents', 'tracker', 'approval', 'rc', 'po', 'delivery', 'qa', 'masters', 'reports', 'audit'],
+    'GM Equipment': ['dashboard', 'tracker', 'approval', 'rc', 'po', 'reports', 'audit'],
+    'SO Equipment': ['dashboard', 'tracker', 'approval', 'rc', 'po', 'reports', 'audit'],
+    'Executive Director': ['dashboard', 'tracker', 'po', 'reports', 'audit'],
+    'DEO · HoD Facility': ['dashboard', 'indents', 'tracker', 'newindent', 'approval', 'reports'],
+    'Consignee': ['dashboard', 'tracker', 'delivery', 'qa', 'reports'],
+    'Vendor': ['dashboard', 'tracker', 'po', 'reports']
   };
   const ROLE_ACTIONS = {
     'Administrator': ['*'],
@@ -111,7 +111,7 @@
   }
 
   /* ================= 1. Router (sidebar + deep links) ================= */
-  const TITLES = { dashboard: 'Dashboard', indents: 'Indent Receipt', newindent: 'Create New Indent', approval: 'Indent Approval', rc: 'Rate Contracts', po: 'Purchase Orders', delivery: 'Delivery & Receipt', qa: 'QA & Acceptance', masters: 'Master Data', reports: 'Reports & Analytics', audit: 'Audit Trail' };
+  const TITLES = { dashboard: 'Dashboard', indents: 'Indent Receipt', tracker: 'Indent Tracker', newindent: 'Create New Indent', approval: 'Indent Approval', rc: 'Rate Contracts', po: 'Purchase Orders', delivery: 'Delivery & Receipt', qa: 'QA & Acceptance', masters: 'Master Data', reports: 'Reports & Analytics', audit: 'Audit Trail' };
   window.openPage = function openPage(id) {
     try {
       if (!rolePages().includes(id)) { toast(`🔒 ${TITLES[id] || id} is not in your ${curRole()} access`, 'err'); return; }
@@ -154,7 +154,7 @@
       const startCard = `<div class="card" style="border-color:#9ec3ee;background:#f2f7ff"><div class="card-head"><h3>＋ Start new indent</h3><span class="badge blue">5-step flow</span></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="avatar sm">D</span><div style="flex:1;min-width:200px"><b>${esc(wiz.deo)} · ${esc(wiz.hod)}</b><small style="display:block;color:var(--muted)">Session identity carries straight into Step 1 — no separate login screen</small></div><button class="primary" data-start-indent>＋ New Indent → Details</button></div></div>`;
       tables = startCard + qCard('My drafts — revise & re-submit', 'TGMSIDC cannot see drafts', ['Indent', 'Ref', 'Lines', 'Value', 'Age', ''], drafts.map((r) => `<tr><td><b>${esc(r.id)}</b></td><td>${esc(r.refNo || '—')}</td><td>${(r.items || []).length}</td><td>₹${r.valueLakh} L</td><td>${staleBadge(r)}</td><td><button class="rowbtn" data-revise="${esc(r.id)}">Revise</button></td></tr>`).join(''))
         + qCard('Submitted — live status', 'locked from editing once submitted', ['Indent', 'Tracking', 'Submitted', 'Status'], filed.map((r) => `<tr><td><b>${esc(r.id)}</b></td><td>${esc(r.trackingId || '—')}</td><td>${esc(r.submitted)}</td><td>${badge(r.status)}</td></tr>`).join(''));
-      acts = roleActs([['newindent', 'New Indent', '5-step flow'], ['indents', 'Indent Receipt', 'track all'], ['approval', 'Track approvals', 'read-only']]);
+      acts = roleActs([['newindent', 'New Indent', '5-step flow'], ['tracker', 'Indent Tracker', 'phase and location'], ['indents', 'Indent Receipt', 'revise drafts']]);
     } else if (role === 'TGMSIDC User') {
       const pend = myInd.filter((r) => /Pending TGMSIDC Review|Returned to TGMSIDC/.test(r.status));
       const rcd = DB.data.rcs.filter((r) => r.status === 'Draft');
@@ -230,6 +230,7 @@
     $('#quickAct').html(`
       <button class="quick" data-goto="newindent">＋ <span><b>New Indent</b><small>Create facility requirement</small></span> →</button>
       <button class="quick" data-goto="approval">✓ <span><b>Pending Approvals</b><small>${d.kpis.pending} items require action</small></span> →</button>
+      <button class="quick" data-goto="tracker">◎ <span><b>Indent Tracker</b><small>Phase, status and location</small></span> →</button>
       <button class="quick" data-goto="reports">▥ <span><b>View Reports</b><small>15 MIS reports &amp; KPIs</small></span> →</button>`);
     } catch (err) { showPageError('dashboard', err); }
   }
@@ -260,6 +261,133 @@
         <td style="white-space:nowrap"><button class="rowbtn" data-view-indent="${esc(r.id)}">View</button>${/Draft|Returned by TGMSIDC/.test(r.status) ? ` <button class="rowbtn" data-revise="${esc(r.id)}">Revise</button>` : ''}</td></tr>`).join('')
         || `<tr><td colspan="7">${emptyState('Try clearing the search / status filter.')}</td></tr>`);
     } catch { $('#indentState').addClass('show').text('⚠ Failed to load indents. Retry.'); }
+  }
+
+  /* ================= 3b. Indent Tracker — list + lifecycle timeline ======= */
+  const TRK_PHASES = ['Indent raised', 'TGMSIDC verification', 'GM proposal', 'SO approval', 'RC / Tender', 'PO issuance', 'Delivery & receipt', 'QA & acceptance'];
+  let trackerId = '';
+  function trkBundle(r) {
+    const rcs = (DB.data.rcs || []).filter((x) => x.indentRef === r.id);
+    const pos = (DB.data.pos || []).filter((p) => p.indent === r.id);
+    const poNos = pos.map((p) => p.no);
+    const dels = (DB.data.deliveries || []).filter((d) => poNos.includes(d.po));
+    const qas = (DB.data.qas || []).filter((q) => poNos.includes(q.po));
+    return { rcs, pos, dels, qas };
+  }
+  function placeOf(name) {
+    const list = (window.DEMS_MASTERS && window.DEMS_MASTERS.INSTITUTION_MASTER) || [];
+    const recs = ((DB.data.masterRecords || {}).Institutions) || [];
+    const hits = [list.find((x) => x.name === name), recs.find((x) => x.name === name)].filter(Boolean);
+    const m = hits.find((x) => x.address) || hits[0];
+    if (!m) return name || '—';
+    return [m.address, m.district].filter(Boolean).join(' · ') || name;
+  }
+  function vendorPlace(name) {
+    const m = (((DB.data.masterRecords || {}).Vendors) || []).find((x) => x.name === name);
+    return m && m.address ? m.address : (name || 'Vendor premises');
+  }
+  function officialPhase(st) {
+    if (/Draft|Returned by TGMSIDC/.test(st)) return 0;
+    if (/Pending TGMSIDC|Returned to TGMSIDC/.test(st)) return 1;
+    if (/Verified|Pending Approval/.test(st)) return 2;
+    if (/Proposed|Partially Approved|Rejected/.test(st)) return 3;
+    if (/Approved/.test(st)) return 4;
+    return 1;
+  }
+  function indentLife(r) {
+    const b = trkBundle(r);
+    const st = r.status || 'Draft';
+    const rejected = /Rejected/i.test(st);
+    const atDeo = /Draft|Returned by TGMSIDC/.test(st);
+    const items = r.items || [];
+    const depts = [...new Set(items.map((i) => i.dept).filter(Boolean))];
+    const deptLabel = depts.join(', ') || 'General';
+    const facility = r.facility || (r.institutions || [])[0] || 'Facility';
+    const consignees = [...new Set(items.flatMap((i) => (i.consignees || []).map((c) => c.institution)).filter(Boolean))];
+    const consignee = consignees[0] || facility;
+    const rc = b.rcs[0];
+    const po = b.pos[0];
+    const vendor = (po && po.lines && po.lines[0] && po.lines[0].vendor) || (rc && rc.vendor) || '';
+    const mode = items.map((i) => i.mode).find(Boolean) || (/Tender/.test(st) ? 'Tender' : /RC/.test(st) ? 'RC' : '');
+    const issued = (p) => !/Draft|Pending PO Approval|Rejected|Cancelled|Returned/.test(p.status || '');
+    const cleared = [
+      !atDeo,
+      !atDeo && (!/Pending TGMSIDC Review|Returned to TGMSIDC/.test(st) || b.rcs.length || b.pos.length),
+      /Proposed|Approved|Partially|Rejected/.test(st) || b.pos.length || b.rcs.some((x) => /SO Approved/.test(x.approval || '')),
+      (/Approved/.test(st) || b.pos.length) && !rejected,
+      b.pos.length > 0 || b.rcs.some((x) => /Active|Expiring|Expired|Closed/.test(x.status) && /Approved/.test(x.approval || '')),
+      b.pos.some(issued),
+      b.dels.length > 0 && b.dels.every((d) => d.status === 'Complete'),
+      b.qas.some((q) => /Accepted/i.test(q.decision || ''))
+    ];
+    let current = cleared.findIndex((ok) => !ok);
+    const complete = current < 0 && !rejected;
+    if (complete) current = TRK_PHASES.length - 1;
+    if (rejected) current = 3;
+    const locs = [
+      { desk: 'DEO · HoD Facility · ' + deptLabel, phy: placeOf(facility) },
+      { desk: 'TGMSIDC · Verification desk', phy: 'TGMSIDC, Hyderabad' },
+      { desk: 'TGMSIDC · GM Equipment', phy: 'TGMSIDC, Hyderabad' },
+      { desk: 'TGMSIDC · SO Equipment', phy: 'TGMSIDC, Hyderabad' },
+      { desk: mode === 'Tender' ? 'TGMSIDC · Tender cell' : 'TGMSIDC · Rate Contract cell', phy: 'TGMSIDC, Hyderabad' },
+      { desk: 'TGMSIDC · Purchase section', phy: 'TGMSIDC, Hyderabad' },
+      b.dels.length
+        ? { desk: 'Consignee · ' + deptLabel, phy: placeOf(consignee) }
+        : { desk: vendor ? 'Vendor · ' + vendor : 'Vendor dispatch', phy: vendor ? vendorPlace(vendor) : 'Vendor premises' },
+      { desk: 'QA committee · ' + deptLabel, phy: placeOf(consignee) }
+    ];
+    const notes = [
+      (r.deo || 'DEO') + ' · ' + (r.trackingId || 'no tracking id') + ' · ' + (r.submitted || r.indentDate || 'not submitted'),
+      items.map((i) => i.equipment + ': ' + (i.verdict || 'Review')).join(' · ') || 'Awaiting verification vs scanned copy',
+      items.map((i) => i.mode).filter(Boolean).join(', ') || (r.gmRemarks || 'Awaiting GM proposal'),
+      rejected ? 'Rejected' : (r.soRemarks || (/Approved/.test(st) ? st : 'Awaiting SO decision')),
+      b.rcs.length ? b.rcs.map((x) => x.no + ' · ' + x.status + (x.approval ? ' · ' + x.approval : '')).join('; ') : (mode ? mode + ' — not yet awarded' : 'Route not chosen'),
+      b.pos.length ? b.pos.map((p) => p.no + ' · ' + p.status).join('; ') : 'No purchase order yet',
+      b.dels.length ? b.dels.map((d) => d.po + ' · ' + d.received + '/' + d.expected + ' · ' + d.status).join('; ') : (b.pos.some((p) => /Dispatch/.test(p.status)) ? 'Awaiting vendor dispatch' : 'Not dispatched'),
+      b.qas.length ? b.qas.map((q) => (q.stage || 'QA') + (q.decision ? ' · ' + q.decision : '')).join('; ') : 'QA not started'
+    ];
+    const steps = TRK_PHASES.map((title, i) => {
+      let state = 'wait';
+      if (rejected && i === current) state = 'stop';
+      else if (rejected && i < current) state = 'done';
+      else if (complete || i < current) state = 'done';
+      else if (i === current) state = 'current';
+      return { title, state, desk: locs[i].desk, phy: locs[i].phy, note: notes[i] };
+    });
+    return { steps, current, complete, rejected, here: steps[current], deptLabel, facility, official: officialPhase(st) };
+  }
+  function renderTracker() {
+    const q = ($('#trkQ').val() || '').toLowerCase();
+    const status = $('#trkStatus').val() || 'All';
+    const seesDrafts = /DEO|Admin/.test(curRole());
+    let rows = (DB.data.indents || []).slice();
+    if (!seesDrafts) rows = rows.filter((r) => !/Draft/.test(r.status));
+    if (status !== 'All') rows = rows.filter((r) => r.status === status);
+    if (q) rows = rows.filter((r) => (r.id + ' ' + (r.trackingId || '') + ' ' + (r.facility || '') + ' ' + (r.district || '') + ' ' + (r.items || []).map((i) => i.equipment + ' ' + i.dept).join(' ')).toLowerCase().includes(q));
+    if (!rows.some((r) => r.id === trackerId)) trackerId = rows[0] ? rows[0].id : '';
+    $('#trkCount').text(rows.length + ' indent(s)' + (seesDrafts ? '' : ' · drafts hidden'));
+    $('#trkRows').html(rows.map((r) => {
+      const life = indentLife(r);
+      return `<tr data-trk="${esc(r.id)}" class="${r.id === trackerId ? 'trk-on' : ''}"><td><b>${esc(r.id)}</b><small>${esc(r.trackingId || '')}</small></td><td>${esc(r.facility || '—')}<small>${esc(r.district || '')}</small></td><td>${esc(life.deptLabel)}</td><td>${badge(r.status)}</td><td><b>${esc(life.here.title)}</b></td><td>${esc(life.here.desk)}</td></tr>`;
+    }).join('') || `<tr><td colspan="6">${emptyState('No indents match this search.')}</td></tr>`);
+    const rec = rows.find((r) => r.id === trackerId);
+    if (!rec) { $('#trkDetail').html(`<div class="card">${emptyState('Select an indent to see its lifecycle.')}</div>`); return; }
+    const life = indentLife(rec);
+    const mark = { done: '✓', current: '●', stop: '!', wait: '○' };
+    const drift = life.current !== life.official
+      ? `<p class="muted" style="margin:0 0 10px">Official status is ${esc(rec.status)}. Linked RC, PO, delivery, or QA records place this indent at <b>${esc(life.here.title)}</b>.</p>`
+      : '';
+    $('#trkDetail').html(`<div class="card trk-detail">
+      <div class="card-head"><h3>${esc(rec.id)}</h3>${badge(life.complete ? 'Lifecycle complete' : life.here.title)}</div>
+      <div class="trk-now">
+        <div><small>Current phase</small><b>${esc(life.here.title)}${life.complete ? ' · complete' : ''}</b></div>
+        <div><small>Status</small><b>${badge(rec.status)}</b></div>
+        <div><small>Department</small><b>${esc(life.here.desk)}</b></div>
+        <div><small>Physical location</small><b>${esc(life.here.phy)}</b></div>
+      </div>
+      ${drift}
+      <ol class="trk-tl">${life.steps.map((s) => `<li class="trk-step ${s.state}"><span class="trk-dot">${mark[s.state] || '○'}</span><div><b>${esc(s.title)}</b><small>${esc(s.desk)}</small><small>${esc(s.phy)}</small><span class="muted">${esc(s.note)}</span></div></li>`).join('')}</ol>
+    </div>`);
   }
 
   /* ================= 4. Create-Indent SINGLE PAGE FORM =====================
@@ -1561,7 +1689,7 @@
     $('#auditRows').html(rows.map((a) => `<tr><td>${esc(a.dt)}</td><td>${esc(a.user)}</td><td>${esc(a.module)}</td><td>${badge(a.action)}</td><td>${esc(a.ref)}</td><td>${esc(a.source)}</td></tr>`).join(''));
   }
 
-  const RENDER = { dashboard: renderDashboard, indents: renderIndents, newindent: renderWizard, approval: renderApproval, rc: renderRCs, po: renderPOs, delivery: renderDelivery, qa: renderQA, masters: renderMasters, reports: renderReports, audit: renderAudit };
+  const RENDER = { dashboard: renderDashboard, indents: renderIndents, tracker: renderTracker, newindent: renderWizard, approval: renderApproval, rc: renderRCs, po: renderPOs, delivery: renderDelivery, qa: renderQA, masters: renderMasters, reports: renderReports, audit: renderAudit };
 
   /* ================= 7. Global chrome events (delegated, demo-proof) ======== */
   $(function () {
@@ -1580,6 +1708,9 @@
     $('#indentFilterBtn').on('click', renderIndents);
     $('#indentQ').on('input', () => clearTimeout(window.__it) || (window.__it = setTimeout(renderIndents, 350)));
     $('#indentStatus').on('change', renderIndents);
+    $('#trkQ').on('input', () => clearTimeout(window.__trk) || (window.__trk = setTimeout(renderTracker, 250)));
+    $('#trkStatus').on('change', renderTracker);
+    $(document).on('click', '[data-trk]', (e) => { trackerId = $(e.currentTarget).attr('data-trk'); renderTracker(); });
     $('#rcFilterBtn').on('click', renderRCs);
     $('#rcQ').on('input', () => clearTimeout(window.__rt) || (window.__rt = setTimeout(renderRCs, 350)));
     $('#auditBtn').on('click', renderAudit);

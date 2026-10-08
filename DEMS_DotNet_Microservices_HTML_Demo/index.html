@@ -24,6 +24,7 @@
       <button class="nav active" data-page="dashboard">▦ <span>Dashboard</span></button>
       <div class="nav-title">PROCUREMENT</div>
       <button class="nav" data-page="indents">▤ <span>Indent Receipt</span></button>
+      <button class="nav" data-page="tracker">◎ <span>Indent Tracker</span></button>
       <button class="nav" data-page="approval">✓ <span>Indent Approval</span><em id="badgeApproval">18</em></button>
       <button class="nav" data-page="rc">▥ <span>Rate Contracts</span><em id="badgeRC">12</em></button>
       <button class="nav" data-page="po">▰ <span>Purchase Orders</span></button>
@@ -98,6 +99,20 @@
           <span class="spacer"></span><span class="muted" id="indentCount"></span></div>
           <div class="tbl-wrap"><table><thead><tr><th>Indent No.</th><th>Facility / Institution</th><th>Items</th><th>Est. Value</th><th>Submitted</th><th>Status</th><th></th></tr></thead><tbody id="indentRows"></tbody></table>
           <div class="state" id="indentState"></div></div></div>
+      </section>
+
+      <!-- INDENT TRACKER -->
+      <section class="page" id="page-tracker">
+        <div class="page-head"><div><h1>Indent Tracker</h1><p>Every indent, its current phase, official status, and where the file sits — department and physical location</p></div></div>
+        <div class="card"><div class="filters">
+          <div class="search-field">⌕ <input id="trkQ" placeholder="Search indent, facility, equipment..."></div>
+          <select id="trkStatus"><option>All</option><option>Draft</option><option>Pending TGMSIDC Review</option><option>Returned by TGMSIDC</option><option>Verified</option><option>Pending Approval</option><option>Proposed</option><option>Returned to TGMSIDC</option><option>Approved · RC</option><option>Approved · Tender</option><option>Approved · Local</option><option>Partially Approved</option><option>Rejected</option></select>
+          <span class="spacer"></span><span class="muted" id="trkCount"></span>
+        </div></div>
+        <div class="trk-layout">
+          <div class="card" style="padding:0"><div class="tbl-wrap"><table><thead><tr><th>Indent</th><th>Facility</th><th>Department</th><th>Status</th><th>Current phase</th><th>Location</th></tr></thead><tbody id="trkRows"></tbody></table></div></div>
+          <div id="trkDetail"></div>
+        </div>
       </section>
 
       <!-- CREATE INDENT — SINGLE PAGE FORM -->
